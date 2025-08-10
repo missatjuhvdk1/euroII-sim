@@ -1,0 +1,50 @@
+{
+    "Zero Waste Solution A": {
+        "Hoeveelheid": 1100.0,
+        "Dichtheid": 1.307,
+        "Max_Volume": 2000.0,
+        "Data": {
+            "Grondstof": ["Fosforzuur 75%", "Magnesiumchloride", "Yzerchloride", "Cobaltsulfaat oplossing", "Nikkelsulfaat oplossing"],
+            "Element": ["P2O5", "MgO", "Fe", "Co", "Ni"],
+            "Gemeten_Concentratie": [23.7, 2.7, 1.17, 105, 200],
+            "Eenheid": ["wt%", "wt%", "wt%", "mg/kg", "mg/kg"],
+            "Spec": [25, 3, 1.175, 110, 220],
+            "Min": [24.2, 2.7, 1.1, 90, 190],
+            "Max": [25.8, 3.3, 1.25, 130, 250],
+            "Concentratie_Grondstof": [74.9, 19.7, 13.7, 8.2, 6.4],
+            "Ratio_Element": [0.5424258, 0.197, 0.137, 0.082, 0.064]
+        }
+    },
+    "DKP 0-20-25": {
+        "Hoeveelheid": 14100.0,
+        "Dichtheid": 1.503,
+        "Max_Volume": 140000.0,
+        "Data": {
+            "Grondstof": ["Fosforzuur 75%", "Kaliloog 50%", "Demiwater"],
+            "Element": ["P2O5", "K2O", "Geen"],
+            "Gemeten_Concentratie": [18.2, 25.4, 0],
+            "Eenheid": ["wt%", "wt%", "wt%"],
+            "Spec": [20.25, 25.25, 0],
+            "Min": [19.5, 24.5, 0],
+            "Max": [21, 26, 0],
+            "Concentratie_Grondstof": [75, 50.3, 0],
+            "Ratio_Element": [0.54315, 0.4222685, 0]
+        }
+    },
+    "PB Bravo": {
+        "Hoeveelheid": 24000.0,
+        "Dichtheid": 1.295,
+        "Max_Volume": 31000.0,
+        "Data": {
+            "Grondstof": ["Ureum prills", "Zwavelzuur 96%", "Demiwater"],
+            "Element": ["N-Ureum", "SO3", "Geen"],
+            "Gemeten_Concentratie": [19.4, 13.9, 0],
+            "Eenheid": ["wt%", "wt%", "wt%"],
+            "Spec": [22, 10, 0],
+            "Min": [21.4, 9.1, 0],
+            "Max": [22.6, 10.9, 0],
+            "Concentratie_Grondstof": [46, 78.36, 0],
+            "Ratio_Element": [0.46, 0.7836, 0]
+        }
+    }
+}

@@ -1,0 +1,47 @@
+{
+  "Tank_A1": {
+    "Name": "Alpha Mixer",
+    "Max_Volume_m3": 15.5,
+    "Stapgrootte": {
+      "Fosforzuur 75%": 5,
+      "Magnesiumchloride": 10,
+      "Yzerchloride": 10,
+      "Cobaltsulfaat oplossing": 5,
+      "Nikkelsulfaat oplossing": 5,
+      "Kaliloog 50%": 10,
+      "Demiwater": 20,
+      "Ureum prills": 15,
+      "Zwavelzuur 96%": 10
+    }
+  },
+  "Tank_B2": {
+    "Name": "Beta Blender",
+    "Max_Volume_m3": 20.0,
+    "Stapgrootte": {
+      "Fosforzuur 75%": 10,
+      "Magnesiumchloride": 15,
+      "Yzerchloride": 15,
+      "Cobaltsulfaat oplossing": 10,
+      "Nikkelsulfaat oplossing": 10,
+      "Kaliloog 50%": 15,
+      "Demiwater": 25,
+      "Ureum prills": 20,
+      "Zwavelzuur 96%": 15
+    }
+  },
+  "Tank_C3": {
+    "Name": "Gamma Reactor",
+    "Max_Volume_m3": 12.0,
+    "Stapgrootte": {
+      "Fosforzuur 75%": 5,
+      "Magnesiumchloride": 5,
+      "Yzerchloride": 5,
+      "Cobaltsulfaat oplossing": 5,
+      "Nikkelsulfaat oplossing": 5,
+      "Kaliloog 50%": 10,
+      "Demiwater": 15,
+      "Ureum prills": 10,
+      "Zwavelzuur 96%": 5
+    }
+  }
+}
