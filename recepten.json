@@ -4,15 +4,15 @@
         "Dichtheid": 1.307,
         "Max_Volume": 2000.0,
         "Data": {
-            "Grondstof": ["Fosforzuur 75%", "Magnesiumchloride", "Yzerchloride", "Cobaltsulfaat oplossing", "Nikkelsulfaat oplossing"],
-            "Element": ["P2O5", "MgO", "Fe", "Co", "Ni"],
-            "Gemeten_Concentratie": [23.7, 2.7, 1.17, 105, 200],
-            "Eenheid": ["wt%", "wt%", "wt%", "mg/kg", "mg/kg"],
-            "Spec": [25, 3, 1.175, 110, 220],
-            "Min": [24.2, 2.7, 1.1, 90, 190],
-            "Max": [25.8, 3.3, 1.25, 130, 250],
-            "Concentratie_Grondstof": [74.9, 19.7, 13.7, 8.2, 6.4],
-            "Ratio_Element": [0.5424258, 0.197, 0.137, 0.082, 0.064]
+            "Grondstof": ["Fosforzuur 75%", "Magnesiumchloride", "Yzerchloride", "Cobaltsulfaat oplossing", "Nikkelsulfaat oplossing", "Demiwater"],
+            "Element": ["P2O5", "MgO", "Fe", "Co", "Ni", "Geen"],
+            "Gemeten_Concentratie": [23.7, 2.7, 1.17, 105, 200, 0],
+            "Eenheid": ["wt%", "wt%", "wt%", "mg/kg", "mg/kg", "wt%"],
+            "Spec": [25, 3, 1.175, 110, 220, 0],
+            "Min": [24.2, 2.7, 1.1, 90, 190, 0],
+            "Max": [25.8, 3.3, 1.25, 130, 250, 0],
+            "Concentratie_Grondstof": [74.9, 19.7, 13.7, 8.2, 6.4, 0],
+            "Ratio_Element": [0.5424258, 0.197, 0.137, 0.082, 0.064, 0]
         }
     },
     "DKP 0-20-25": {
