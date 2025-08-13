@@ -249,18 +249,18 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
             continue
         conversie_factor = 100 if eenheden[i] == 'wt%' else 1000000
         current_conc = (actuele_hoeveelheden[i] / massa_product) * conversie_factor if massa_product > 0 else 0
-        if current_conc <= min_specs[i]:  # Changed from < to <=
+        if current_conc < specs[i]:  # Target midpoint between Min and Spec if below Spec
             target_set.append(i)
             target = (min_specs[i] + specs[i]) / 2  # Midpoint between Min and Spec
             targets[i] = target
             diag_msg = f"midpoint between Min {min_specs[i]:.2f} and Spec {specs[i]:.2f}"
-        elif current_conc >= max_specs[i]:  # Changed from > to >=
+        elif current_conc > specs[i]:  # Target midpoint between Spec and Max if above Spec
             target_set.append(i)
             target = (specs[i] + max_specs[i]) / 2  # Midpoint between Spec and Max
             targets[i] = target
             diag_msg = f"midpoint between Spec {specs[i]:.2f} and Max {max_specs[i]:.2f}"
         else:
-            diag_msg = f"Within specs, no target set (current: {current_conc:.2f})"
+            diag_msg = f"At or equal to Spec, no target set (current: {current_conc:.2f})"
         target_value = targets.get(i, None)
         target_str = f"{target_value:.2f}" if isinstance(target_value, (int, float)) else "None"
         diagnostics.append(f"{df['Element'][i]} target: {target_str} ({diag_msg}, current: {current_conc:.2f})")
