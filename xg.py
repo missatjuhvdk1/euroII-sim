@@ -93,7 +93,7 @@ with st.expander("Algemene Gegevens", expanded=True):
 # Toggle voor Max_Volume constraint
 col_max_vol1, col_max_vol2 = st.columns([1, 2])
 with col_max_vol1:
-    use_max_volume = st.checkbox("Gebruik Max. Volume beperking", value=True, help="Schakel uit om de maximale volumebeperking te negeren.")
+    use_max_volume = st.checkbox("Gebruik Max. Volume beperking", value=False, help="Schakel uit om de maximale volumebeperking te negeren.")
 with col_max_vol2:
     default_max_volume_m3 = tanks[tank]["Max_Volume_m3"]
     max_volume_m3 = st.number_input(
@@ -215,14 +215,13 @@ df['Actuele_Hoeveelheid_Element'] = df.apply(bereken_actuele_hoeveelheid_element
 # Bereken actuele hoeveelheid grondstof (kolom G)
 df['Actuele_Hoeveelheid_Grondstof'] = df.apply(bereken_actuele_hoeveelheid_grondstof, axis=1)
 
-def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden, min_specs, max_specs, specs, use_max_volume, max_volume, stapgroottes, asymmetric_above=False, target_set=None, hard_set=None, targets=None):
+def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden, min_specs, max_specs, specs, use_max_volume, max_volume, stapgroottes, mass_penalty=50):
     if massa_product <= 0:
         return np.zeros(len(ratios), dtype=int), massa_product, "Geen massa; geen optimalisatie nodig."
-    if target_set is None:
-        target_set = range(len(ratios))
-    if hard_set is None:
-        hard_set = range(len(ratios))
+
     prob = LpProblem("Minimize_Additions_And_Deviations", LpMinimize)
+
+    # Define variables for additions
     toevoegingen = {}
     for i in range(len(ratios)):
         stapgrootte = stapgroottes[i]
@@ -231,41 +230,53 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
             toevoegingen[i] = aantal_stappen * stapgrootte
         else:
             toevoegingen[i] = LpVariable(f"add_{i}", lowBound=0, cat='Integer')
+
+    # Total mass
     totale_massa = massa_product + lpSum(toevoegingen.values())
-    costs = [st.session_state.kosten[df['Grondstof'][i]] for i in range(len(ratios))]  # Use user-defined costs
+
+    # Objective: Minimize additions (with costs) + deviations + total mass penalty
+    costs = [st.session_state.kosten[df['Grondstof'][i]] for i in range(len(ratios))]
     objective = lpSum(costs[i] * toevoegingen[i] for i in range(len(ratios)))
+    objective += mass_penalty * lpSum(toevoegingen.values())  # Penalize total mass added
+
+    # Identify out-of-spec elements and set targets
     diagnostics = []
-    deviation_weight = 10000
-    for i in target_set:
+    deviation_weight = 50000  # High weight to hit midpoints
+    target_set = []
+    targets = {}
+    for i in range(len(ratios)):
         if ratios[i] == 0:
             continue
         conversie_factor = 100 if eenheden[i] == 'wt%' else 1000000
-        totale_element = actuele_hoeveelheden[i] + toevoegingen[i] * ratios[i]
         current_conc = (actuele_hoeveelheden[i] / massa_product) * conversie_factor if massa_product > 0 else 0
-        if targets is None or i not in targets:
-            if current_conc < min_specs[i]:
-                target = (min_specs[i] + specs[i]) / 2
-                diag_msg = f"midpoint between Min {min_specs[i]:.2f} and Spec {specs[i]:.2f}"
-            elif current_conc > max_specs[i]:
-                if asymmetric_above:
-                    target = (min_specs[i] + specs[i]) / 2
-                    diag_msg = f"asymmetric midpoint between Min {min_specs[i]:.2f} and Spec {specs[i]:.2f}"
-                else:
-                    target = (specs[i] + max_specs[i]) / 2
-                    diag_msg = f"midpoint between Spec {specs[i]:.2f} and Max {max_specs[i]:.2f}"
-            else:
-                target = specs[i]
-                diag_msg = f"Spec {specs[i]:.2f}"
+        if current_conc <= min_specs[i]:  # Changed from < to <=
+            target_set.append(i)
+            target = (min_specs[i] + specs[i]) / 2  # Midpoint between Min and Spec
+            targets[i] = target
+            diag_msg = f"midpoint between Min {min_specs[i]:.2f} and Spec {specs[i]:.2f}"
+        elif current_conc >= max_specs[i]:  # Changed from > to >=
+            target_set.append(i)
+            target = (specs[i] + max_specs[i]) / 2  # Midpoint between Spec and Max
+            targets[i] = target
+            diag_msg = f"midpoint between Spec {specs[i]:.2f} and Max {max_specs[i]:.2f}"
         else:
-            target = targets[i]
-            diag_msg = "Custom target"
-        diagnostics.append(f"{df['Element'][i]} target: {target:.2f} ({diag_msg}, current: {current_conc:.2f})")
-        target_element_mass = target * totale_massa / conversie_factor
+            diag_msg = f"Within specs, no target set (current: {current_conc:.2f})"
+        target_value = targets.get(i, None)
+        target_str = f"{target_value:.2f}" if isinstance(target_value, (int, float)) else "None"
+        diagnostics.append(f"{df['Element'][i]} target: {target_str} ({diag_msg}, current: {current_conc:.2f})")
+
+    # Constraints and deviations for targeted elements
+    for i in target_set:
+        conversie_factor = 100 if eenheden[i] == 'wt%' else 1000000
+        totale_element = actuele_hoeveelheden[i] + toevoegingen[i] * ratios[i]
+        target_element_mass = targets[i] * totale_massa / conversie_factor
         dev_plus = LpVariable(f"dev_plus_{i}", lowBound=0)
         dev_minus = LpVariable(f"dev_minus_{i}", lowBound=0)
         prob += totale_element == target_element_mass + dev_plus - dev_minus, f"target_dev_{i}"
         objective += deviation_weight * (dev_plus + dev_minus)
-    for i in hard_set:
+
+    # Hard min/max constraints for all elements
+    for i in range(len(ratios)):
         if ratios[i] == 0:
             continue
         conversie_factor = 100 if eenheden[i] == 'wt%' else 1000000
@@ -274,10 +285,16 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
         max_element_mass = max_specs[i] * totale_massa / conversie_factor
         prob += totale_element >= min_element_mass, f"Min_{i}"
         prob += totale_element <= max_element_mass, f"Max_{i}"
+
     prob += objective
+
+    # Volume constraint
     if use_max_volume and max_volume is not None and max_volume > 0:
         prob += totale_massa / dichtheid <= max_volume, "Max_Volume_Constraint"
-    prob.solve(PULP_CBC_CMD(timeLimit=60, msg=1))
+
+    # Solve
+    prob.solve(PULP_CBC_CMD(timeLimit=180, msg=1))  # 180 seconds for better solutions
+
     if LpStatus[prob.status] == 'Optimal':
         optimized_toevoegingen = []
         for i in range(len(ratios)):
@@ -291,63 +308,25 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
         optimized_totale_massa = massa_product + sum(optimized_toevoegingen)
         for diag in diagnostics:
             print(diag)
+        print("\nMaterial Additions:")
+        for i, value in enumerate(optimized_toevoegingen):
+            if value > 0:
+                print(f"{df['Grondstof'][i]}: {value} kg (Cost: {costs[i]:.2f})")
         return optimized_toevoegingen, optimized_totale_massa, "Succes"
     else:
         fail_msg = f"Optimalisatie mislukt: {LpStatus[prob.status]}. Targets:\n" + "\n".join(diagnostics)
         return None, None, fail_msg
-
+    
 # Knop voor optimalisatie
 st.header("Geoptimaliseerde Toevoegingen")
 if st.button("Bereken Geoptimaliseerde Toevoegingen", help="Klik om de optimalisatie te starten op basis van de ingevoerde concentraties."):
     with st.spinner("Optimalisatie wordt uitgevoerd..."):
         stapgroottes = [st.session_state.stapgroottes[grondstof] for grondstof in df['Grondstof']]
-        # Vinden initial out of spec
-        initial_out = []
-        targets = {}
-        for i, row in df.iterrows():
-            if row['Element'] == 'Geen':
-                continue
-            current = row['Gemeten_Concentratie']
-            if current < row['Min']:
-                initial_out.append(i)
-                targets[i] = (row['Min'] + row['Spec']) / 2
-            elif current > row['Max']:
-                initial_out.append(i)
-                targets[i] = (row['Spec'] + row['Max']) / 2
-        # Eerste stap: Naive correctie, alleen targets en hard voor initial out
         optimized_toevoegingen, optimized_totale_massa, status = optimize_toevoegingen(
             massa_product, df['Actuele_Hoeveelheid_Element'].values, df['Ratio_Element'].values,
             df['Eenheid'].values, df['Min'].values, df['Max'].values, df['Spec'].values,
-            use_max_volume, max_volume_liters, stapgroottes, asymmetric_above=False,
-            target_set=initial_out, hard_set=initial_out, targets=targets
+            use_max_volume, max_volume_liters, stapgroottes, mass_penalty=50
         )
-        if status == "Succes":
-            df['Toevoegen Grondstof'] = optimized_toevoegingen
-            df['Geoptimaliseerde_Toegevoegd_Element'] = df.apply(bereken_toegevoegd_element, axis=1)
-            df['Na Optimalisatie'] = df.apply(bereken_gecorrigeerde_concentratie, axis=1, totale_massa_correctie=optimized_totale_massa)
-            # Vinden nieuwe out of spec
-            new_out = []
-            for i, row in df.iterrows():
-                if row['Element'] == 'Geen':
-                    continue
-                if i in initial_out:
-                    continue
-                na = row['Na Optimalisatie']
-                if na < row['Min']:
-                    new_out.append(i)
-                    targets[i] = (row['Min'] + row['Spec']) / 2
-                elif na > row['Max']:
-                    new_out.append(i)
-                    targets[i] = (row['Spec'] + row['Max']) / 2
-            if new_out:
-                # Tweede stap: Volledige correctie
-                target_set = initial_out + new_out
-                optimized_toevoegingen, optimized_totale_massa, status = optimize_toevoegingen(
-                    massa_product, df['Actuele_Hoeveelheid_Element'].values, df['Ratio_Element'].values,
-                    df['Eenheid'].values, df['Min'].values, df['Max'].values, df['Spec'].values,
-                    use_max_volume, max_volume_liters, stapgroottes, asymmetric_above=False,
-                    target_set=target_set, hard_set=range(len(df)), targets=targets
-                )
         if status == "Succes":
             df['Toevoegen Grondstof'] = optimized_toevoegingen
             df['Geoptimaliseerde_Toegevoegd_Element'] = df.apply(bereken_toegevoegd_element, axis=1)
