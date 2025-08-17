@@ -154,9 +154,33 @@ with st.expander("Gemeten Concentratie per Element", expanded=True):
                 key=f"conc_{recept}_{tank}_{element}"
             )
 
-# Dedicated section for Step Sizes and Costs
-with st.expander("Stapgroottes en Kosten per Grondstof", expanded=True):
-    st.info("Voer de stapgroottes (in kg) en kosten (voor prioriteit) in. Stapgrootte 0 betekent geen stappen. Lagere kosten geven hogere prioriteit.")
+# Dedicated section for Step Sizes, Costs, and Prioritization
+with st.expander("Stapgroottes, Kosten en Prioriteiten", expanded=True):
+    st.info("Voer de stapgroottes (in kg), kosten (voor prioriteit) en prioriteiten voor massa en specificaties in. Stapgrootte 0 betekent geen stappen. Lagere kosten geven hogere prioriteit.")
+    
+    # Sliders for prioritization
+    st.subheader("Prioriteiten voor Optimalisatie")
+    col_mass, col_specs = st.columns(2)
+    with col_mass:
+        mass_priority = st.slider(
+            "Prioriteit voor Massaminimalisatie",
+            min_value=0,
+            max_value=100,
+            value=100,
+            step=1,
+            help="Hogere waarde geeft meer prioriteit aan het minimaliseren van toegevoegde massa."
+        )
+    with col_specs:
+        specs_priority = st.slider(
+            "Prioriteit voor Specificatie Naleving",
+            min_value=0,
+            max_value=100,
+            value=25,
+            step=1,
+            help="Hogere waarde geeft meer prioriteit aan het exact naleven van specificaties."
+        )
+
+    # Input for step sizes and costs
     for idx, row in df.iterrows():
         grondstof = row['Grondstof']
         col_step, col_cost = st.columns(2)
@@ -177,7 +201,7 @@ with st.expander("Stapgroottes en Kosten per Grondstof", expanded=True):
                 f"Kosten (prioriteit) voor {grondstof}",
                 value=default_cost,
                 step=0.01,
-                min_value=0.01,  # Minimum cost is 0.01
+                min_value=0.01,
                 format="%.2f",
                 key=f"cost_{recept}_{tank}_{grondstof}",
                 help=f"Kosten voor {grondstof}. Lagere kosten geven hogere prioriteit (bijv. 0.01 voor voorkeur, 1.0 voor standaard, >1.0 voor lage prioriteit)."
@@ -215,7 +239,7 @@ df['Actuele_Hoeveelheid_Element'] = df.apply(bereken_actuele_hoeveelheid_element
 # Bereken actuele hoeveelheid grondstof (kolom G)
 df['Actuele_Hoeveelheid_Grondstof'] = df.apply(bereken_actuele_hoeveelheid_grondstof, axis=1)
 
-def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden, min_specs, max_specs, specs, use_max_volume, max_volume, stapgroottes, mass_penalty=50):
+def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden, min_specs, max_specs, specs, use_max_volume, max_volume, stapgroottes, mass_priority, specs_priority):
     if massa_product <= 0:
         return np.zeros(len(ratios), dtype=int), massa_product, "Geen massa; geen optimalisatie nodig."
 
@@ -234,14 +258,27 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
     # Total mass
     totale_massa = massa_product + lpSum(toevoegingen.values())
 
+    # Normalize priorities to weights (sum to 1 for balanced scaling)
+    total_priority = mass_priority + specs_priority
+    if total_priority == 0:
+        mass_weight = 0.5
+        specs_weight = 0.5
+    else:
+        mass_weight = mass_priority / total_priority
+        specs_weight = specs_priority / total_priority
+
+    # Scale weights to reasonable magnitudes (base values from original code)
+    mass_penalty = mass_weight * 100  # Base penalty scaled up to match original 50
+    deviation_weight = specs_weight * 100000  # Base penalty scaled to match original 50000
+
     # Objective: Minimize additions (with costs) + deviations + total mass penalty
     costs = [st.session_state.kosten[df['Grondstof'][i]] for i in range(len(ratios))]
     objective = lpSum(costs[i] * toevoegingen[i] for i in range(len(ratios)))
     objective += mass_penalty * lpSum(toevoegingen.values())  # Penalize total mass added
+    # Note: Deviation penalties are added later for targeted elements
 
     # Identify out-of-spec elements and set targets
     diagnostics = []
-    deviation_weight = 50000  # High weight to hit midpoints
     target_set = []
     targets = {}
     for i in range(len(ratios)):
@@ -251,12 +288,12 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
         current_conc = (actuele_hoeveelheden[i] / massa_product) * conversie_factor if massa_product > 0 else 0
         if current_conc < specs[i]:  # Target midpoint between Min and Spec if below Spec
             target_set.append(i)
-            target = (min_specs[i] + specs[i]) / 2  # Midpoint between Min and Spec
+            target = (min_specs[i] + specs[i]) / 2
             targets[i] = target
             diag_msg = f"midpoint between Min {min_specs[i]:.2f} and Spec {specs[i]:.2f}"
         elif current_conc > specs[i]:  # Target midpoint between Spec and Max if above Spec
             target_set.append(i)
-            target = (specs[i] + max_specs[i]) / 2  # Midpoint between Spec and Max
+            target = (specs[i] + max_specs[i]) / 2
             targets[i] = target
             diag_msg = f"midpoint between Spec {specs[i]:.2f} and Max {max_specs[i]:.2f}"
         else:
@@ -293,7 +330,7 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
         prob += totale_massa / dichtheid <= max_volume, "Max_Volume_Constraint"
 
     # Solve
-    prob.solve(PULP_CBC_CMD(timeLimit=180, msg=1))  # 180 seconds for better solutions
+    prob.solve(PULP_CBC_CMD(timeLimit=180, msg=1))
 
     if LpStatus[prob.status] == 'Optimal':
         optimized_toevoegingen = []
@@ -325,7 +362,7 @@ if st.button("Bereken Geoptimaliseerde Toevoegingen", help="Klik om de optimalis
         optimized_toevoegingen, optimized_totale_massa, status = optimize_toevoegingen(
             massa_product, df['Actuele_Hoeveelheid_Element'].values, df['Ratio_Element'].values,
             df['Eenheid'].values, df['Min'].values, df['Max'].values, df['Spec'].values,
-            use_max_volume, max_volume_liters, stapgroottes, mass_penalty=50
+            use_max_volume, max_volume_liters, stapgroottes, mass_priority, specs_priority
         )
         if status == "Succes":
             df['Toevoegen Grondstof'] = optimized_toevoegingen
