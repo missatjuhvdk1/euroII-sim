@@ -154,27 +154,60 @@ with st.expander("Gemeten Concentratie per Element", expanded=True):
                 key=f"conc_{recept}_{tank}_{element}"
             )
 
-with st.expander("Optimalisatie Prioriteiten", expanded=True):
-    st.info("Stel de prioriteiten in voor de optimalisatie. Hogere waarden geven meer gewicht.")
+# Optimalisatie Penalties
+with st.expander("Optimalisatie Penalties", expanded=True):
+    st.info("Stel de verhouding in tussen de penalties voor massaminimalisatie en specificatie afwijkingen. De slider bepaalt de verhouding, waarbij beide penalties bij 1:1 starten op 10000.0.")
+
+    # Initialize session state if not already set
+    if 'ratio_log' not in st.session_state:
+        st.session_state.ratio_log = 1.0
+    if 'mass_penalty' not in st.session_state:
+        st.session_state.mass_penalty = 10000.0
+    if 'deviation_weight' not in st.session_state:
+        st.session_state.deviation_weight = 10000.0
+
+    # Reset button for penalties
+    if st.button("Reset Penalties naar Standaard", help="Herstel de standaard penalties (verhouding 1:1, beide penalties op 10000.0)"):
+        st.session_state.ratio_log = 1.0
+        st.session_state.mass_penalty = 10000.0
+        st.session_state.deviation_weight = 10000.0
+        st.session_state.ratio_slider = 1.0  # Sync the slider's session state
+
+    # Ratio slider, using session_state.ratio_log as the value
+    ratio_log = st.slider(
+        "Straf Verhouding (Massaminimalisatie : Specificatie Afwijkingen)",
+        min_value=0.0,  # Represents 1:100 (log10(0.01))
+        max_value=2.0,  # Represents 100:1 (log10(100))
+        value=st.session_state.ratio_log,  # Use session state for slider value
+        step=0.1,
+        format="%.2f",
+        key="ratio_slider",
+        help="Verplaatst de slider om de verhouding tussen massaminimalisatie en specificatie afwijkingen aan te passen. 0.0 = 1:1 (beide 10000.0), -2.0 = 1:100, 2.0 = 100:1."
+    )
+
+    # Calculate penalties based on the ratio
+    ratio = 10 ** ratio_log  # Convert log value to actual ratio
+    base_penalty = 10000.0
+
+    # Mass penalty is base_penalty, deviation penalty is base_penalty * ratio
+    mass_penalty = base_penalty
+    deviation_weight = base_penalty * ratio
+
+    # Ensure penalties stay within reasonable bounds
+    mass_penalty = max(0.0, min(mass_penalty, 1000000.0))
+    deviation_weight = max(0.0, min(deviation_weight, 1000000.0))
+
+    # Update session state
+    st.session_state.ratio_log = ratio_log
+    st.session_state.mass_penalty = mass_penalty
+    st.session_state.deviation_weight = deviation_weight
+
+    # Display the calculated penalties
     col_mass, col_specs = st.columns(2)
     with col_mass:
-        mass_priority = st.slider(
-            "Prioriteit voor Massaminimalisatie",
-            min_value=0,
-            max_value=100,
-            value=100,  # Default naar 100
-            step=1,
-            help="Hogere waarde geeft meer prioriteit aan het minimaliseren van toegevoegde massa."
-        )
+        st.metric("Penalty voor Massaminimalisatie", f"{mass_penalty:.1f}")
     with col_specs:
-        specs_priority = st.slider(
-            "Prioriteit voor Specificatie Naleving",
-            min_value=0,
-            max_value=100,
-            value=5,  # Default naar 5
-            step=1,
-            help="Hogere waarde geeft meer prioriteit aan het exact naleven van specificaties."
-        )
+        st.metric("Penalty voor Specificatie Afwijkingen", f"{deviation_weight:.1f}")
 
 # Reset session state bij wijziging van recept of tank
 if ('current_recept' not in st.session_state or st.session_state.current_recept != recept or
@@ -254,7 +287,7 @@ df['Actuele_Hoeveelheid_Element'] = df.apply(bereken_actuele_hoeveelheid_element
 # Bereken actuele hoeveelheid grondstof (kolom G)
 df['Actuele_Hoeveelheid_Grondstof'] = df.apply(bereken_actuele_hoeveelheid_grondstof, axis=1)
 
-def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden, min_specs, max_specs, specs, use_max_volume, max_volume, stapgroottes, mass_priority, specs_priority, excluded_indices=None):
+def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden, min_specs, max_specs, specs, use_max_volume, max_volume, stapgroottes, mass_penalty, deviation_weight, excluded_indices=None):
     if excluded_indices is None:
         excluded_indices = []
     if massa_product <= 0:
@@ -277,19 +310,6 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
 
     # Total mass
     totale_massa = massa_product + lpSum(toevoegingen.values())
-
-    # Normalize priorities to weights
-    total_priority = mass_priority + specs_priority
-    if total_priority == 0:
-        mass_weight = 0.5
-        specs_weight = 0.5
-    else:
-        mass_weight = mass_priority / total_priority
-        specs_weight = specs_priority / total_priority
-
-    # Scale weights
-    mass_penalty = mass_weight * 100
-    deviation_weight = specs_weight * 100000
 
     # Objective
     costs = [st.session_state.kosten[df['Grondstof'][i]] for i in range(len(ratios))]
@@ -406,8 +426,8 @@ if st.button("Bereken Geoptimaliseerde Toevoegingen", help="Klik om de optimalis
             use_max_volume, 
             max_volume_liters, 
             stapgroottes, 
-            mass_priority, 
-            specs_priority,
+            mass_penalty, 
+            deviation_weight,
             excluded_indices=[]  # Geen exclusies voor originele optimalisatie
         )
         if status == "Succes":
@@ -472,7 +492,7 @@ else:
     st.info("Klik op de knop om de optimalisatie te starten.")
 
 # Aangepaste Correctie Sectie
-st.subheader("Aangepaste Correctie (Excluden Grondstoffen)")
+st.subheader("Aangepaste Correctie (Excluderen Grondstoffen)")
 if st.session_state.optimized_toevoegingen is not None:
     excluded_indices = []
     toevoegingen_present = False
@@ -480,7 +500,7 @@ if st.session_state.optimized_toevoegingen is not None:
         grondstof = df['Grondstof'][i]
         if toevoeging > 0:
             toevoegingen_present = True
-            if not st.checkbox(f"Include {grondstof} ({toevoeging} kg)", value=True, key=f"exclude_{recept}_{tank}_{grondstof}_{i}"):
+            if not st.checkbox(f"{grondstof} toevoegen ({toevoeging} kg)", value=True, key=f"exclude_{recept}_{tank}_{grondstof}_{i}"):
                 excluded_indices.append(i)
     st.session_state.excluded_indices = excluded_indices
 
@@ -499,8 +519,8 @@ if st.session_state.optimized_toevoegingen is not None:
                 use_max_volume, 
                 max_volume_liters, 
                 stapgroottes, 
-                mass_priority, 
-                specs_priority,
+                mass_penalty, 
+                deviation_weight,
                 excluded_indices=st.session_state.excluded_indices
             )
             if adj_status == "Succes":
