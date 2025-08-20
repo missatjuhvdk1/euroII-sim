@@ -154,19 +154,15 @@ with st.expander("Gemeten Concentratie per Element", expanded=True):
                 key=f"conc_{recept}_{tank}_{element}"
             )
 
-# Dedicated section for Step Sizes, Costs, and Prioritization
-with st.expander("Stapgroottes, Kosten en Prioriteiten", expanded=True):
-    st.info("Voer de stapgroottes (in kg), kosten (voor prioriteit) en prioriteiten voor massa en specificaties in. Stapgrootte 0 betekent geen stappen. Lagere kosten geven hogere prioriteit.")
-    
-    # Sliders for prioritization
-    st.subheader("Prioriteiten voor Optimalisatie")
+with st.expander("Optimalisatie Prioriteiten", expanded=True):
+    st.info("Stel de prioriteiten in voor de optimalisatie. Hogere waarden geven meer gewicht.")
     col_mass, col_specs = st.columns(2)
     with col_mass:
         mass_priority = st.slider(
             "Prioriteit voor Massaminimalisatie",
             min_value=0,
             max_value=100,
-            value=100,
+            value=100,  # Default naar 100
             step=1,
             help="Hogere waarde geeft meer prioriteit aan het minimaliseren van toegevoegde massa."
         )
@@ -175,12 +171,31 @@ with st.expander("Stapgroottes, Kosten en Prioriteiten", expanded=True):
             "Prioriteit voor Specificatie Naleving",
             min_value=0,
             max_value=100,
-            value=25,
+            value=5,  # Default naar 5
             step=1,
             help="Hogere waarde geeft meer prioriteit aan het exact naleven van specificaties."
         )
 
-    # Input for step sizes and costs
+# Reset session state bij wijziging van recept of tank
+if ('current_recept' not in st.session_state or st.session_state.current_recept != recept or
+    'current_tank' not in st.session_state or st.session_state.current_tank != tank):
+    st.session_state.stapgroottes = {
+        row['Grondstof']: 0 for _, row in df.iterrows()
+    }
+    st.session_state.kosten = {
+        row['Grondstof']: 0.01 if row['Grondstof'] == 'Demiwater' else 1.0
+        for _, row in df.iterrows()
+    }
+    st.session_state.excluded_indices = []
+    st.session_state.current_recept = recept
+    st.session_state.current_tank = tank
+
+# Stapgroottes en Kosten sectie
+with st.expander("Stapgroottes en Kosten", expanded=False):
+    st.info("Voer de stapgroottes (in kg) en kosten (voor prioriteit) in. Stapgrootte 0 betekent geen stappen. Lagere kosten geven hogere prioriteit.")
+    if st.button("Reset Kosten naar Standaard", help="Herstel standaard kosten (Demiwater: 0.01, overige: 1.0)"):
+        for grondstof in df['Grondstof']:
+            st.session_state.kosten[grondstof] = 0.01 if grondstof == 'Demiwater' else 1.0
     for idx, row in df.iterrows():
         grondstof = row['Grondstof']
         col_step, col_cost = st.columns(2)
@@ -191,7 +206,7 @@ with st.expander("Stapgroottes, Kosten en Prioriteiten", expanded=True):
                 value=st.session_state.stapgroottes.get(grondstof, default_step),
                 step=1,
                 min_value=0,
-                key=f"step_{recept}_{tank}_{grondstof}",
+                key=f"step_{recept}_{tank}_{grondstof}_{idx}",  # Unieke sleutel met idx
                 help=f"Stapgrootte voor {grondstof} in kg (0 voor geen stappen, standaard: {default_step} kg)."
             )
             st.session_state.stapgroottes[grondstof] = int(step_value)
@@ -203,7 +218,7 @@ with st.expander("Stapgroottes, Kosten en Prioriteiten", expanded=True):
                 step=0.01,
                 min_value=0.01,
                 format="%.2f",
-                key=f"cost_{recept}_{tank}_{grondstof}",
+                key=f"cost_{recept}_{tank}_{grondstof}_{idx}",  # Unieke sleutel met idx
                 help=f"Kosten voor {grondstof}. Lagere kosten geven hogere prioriteit (bijv. 0.01 voor voorkeur, 1.0 voor standaard, >1.0 voor lage prioriteit)."
             )
             st.session_state.kosten[grondstof] = float(cost_value)
@@ -239,7 +254,9 @@ df['Actuele_Hoeveelheid_Element'] = df.apply(bereken_actuele_hoeveelheid_element
 # Bereken actuele hoeveelheid grondstof (kolom G)
 df['Actuele_Hoeveelheid_Grondstof'] = df.apply(bereken_actuele_hoeveelheid_grondstof, axis=1)
 
-def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden, min_specs, max_specs, specs, use_max_volume, max_volume, stapgroottes, mass_priority, specs_priority):
+def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden, min_specs, max_specs, specs, use_max_volume, max_volume, stapgroottes, mass_priority, specs_priority, excluded_indices=None):
+    if excluded_indices is None:
+        excluded_indices = []
     if massa_product <= 0:
         return np.zeros(len(ratios), dtype=int), massa_product, "Geen massa; geen optimalisatie nodig."
 
@@ -248,17 +265,20 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
     # Define variables for additions
     toevoegingen = {}
     for i in range(len(ratios)):
-        stapgrootte = stapgroottes[i]
-        if stapgrootte > 0:
-            aantal_stappen = LpVariable(f"steps_{i}", lowBound=0, cat='Integer')
-            toevoegingen[i] = aantal_stappen * stapgrootte
+        if i in excluded_indices:
+            toevoegingen[i] = 0  # Fix excluded grondstoffen op 0
         else:
-            toevoegingen[i] = LpVariable(f"add_{i}", lowBound=0, cat='Integer')
+            stapgrootte = stapgroottes[i]
+            if stapgrootte > 0:
+                aantal_stappen = LpVariable(f"steps_{i}", lowBound=0, cat='Integer')
+                toevoegingen[i] = aantal_stappen * stapgrootte
+            else:
+                toevoegingen[i] = LpVariable(f"add_{i}", lowBound=0, cat='Integer')
 
     # Total mass
     totale_massa = massa_product + lpSum(toevoegingen.values())
 
-    # Normalize priorities to weights (sum to 1 for balanced scaling)
+    # Normalize priorities to weights
     total_priority = mass_priority + specs_priority
     if total_priority == 0:
         mass_weight = 0.5
@@ -267,31 +287,31 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
         mass_weight = mass_priority / total_priority
         specs_weight = specs_priority / total_priority
 
-    # Scale weights to reasonable magnitudes (base values from original code)
-    mass_penalty = mass_weight * 100  # Base penalty scaled up to match original 50
-    deviation_weight = specs_weight * 100000  # Base penalty scaled to match original 50000
+    # Scale weights
+    mass_penalty = mass_weight * 100
+    deviation_weight = specs_weight * 100000
 
-    # Objective: Minimize additions (with costs) + deviations + total mass penalty
+    # Objective
     costs = [st.session_state.kosten[df['Grondstof'][i]] for i in range(len(ratios))]
     objective = lpSum(costs[i] * toevoegingen[i] for i in range(len(ratios)))
-    objective += mass_penalty * lpSum(toevoegingen.values())  # Penalize total mass added
-    # Note: Deviation penalties are added later for targeted elements
-
-    # Identify out-of-spec elements and set targets
+    objective += mass_penalty * lpSum(toevoegingen.values())
+    
+    # Diagnostics and targets
     diagnostics = []
     target_set = []
     targets = {}
     for i in range(len(ratios)):
-        if ratios[i] == 0:
+        if ratios[i] == 0 or i in excluded_indices:
+            diagnostics.append(f"{df['Element'][i]}: Excluded or no ratio, skipped")
             continue
         conversie_factor = 100 if eenheden[i] == 'wt%' else 1000000
         current_conc = (actuele_hoeveelheden[i] / massa_product) * conversie_factor if massa_product > 0 else 0
-        if current_conc < specs[i]:  # Target midpoint between Min and Spec if below Spec
+        if current_conc < specs[i]:
             target_set.append(i)
             target = (min_specs[i] + specs[i]) / 2
             targets[i] = target
             diag_msg = f"midpoint between Min {min_specs[i]:.2f} and Spec {specs[i]:.2f}"
-        elif current_conc > specs[i]:  # Target midpoint between Spec and Max if above Spec
+        elif current_conc > specs[i]:
             target_set.append(i)
             target = (specs[i] + max_specs[i]) / 2
             targets[i] = target
@@ -302,7 +322,7 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
         target_str = f"{target_value:.2f}" if isinstance(target_value, (int, float)) else "None"
         diagnostics.append(f"{df['Element'][i]} target: {target_str} ({diag_msg}, current: {current_conc:.2f})")
 
-    # Constraints and deviations for targeted elements
+    # Constraints and deviations
     for i in target_set:
         conversie_factor = 100 if eenheden[i] == 'wt%' else 1000000
         totale_element = actuele_hoeveelheden[i] + toevoegingen[i] * ratios[i]
@@ -312,9 +332,9 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
         prob += totale_element == target_element_mass + dev_plus - dev_minus, f"target_dev_{i}"
         objective += deviation_weight * (dev_plus + dev_minus)
 
-    # Hard min/max constraints for all elements
+    # Hard min/max constraints
     for i in range(len(ratios)):
-        if ratios[i] == 0:
+        if ratios[i] == 0 or i in excluded_indices:
             continue
         conversie_factor = 100 if eenheden[i] == 'wt%' else 1000000
         totale_element = actuele_hoeveelheden[i] + toevoegingen[i] * ratios[i]
@@ -335,11 +355,15 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
     if LpStatus[prob.status] == 'Optimal':
         optimized_toevoegingen = []
         for i in range(len(ratios)):
-            if stapgroottes[i] > 0:
-                aantal_stappen = prob.variablesDict().get(f"steps_{i}")
-                value = int(round(aantal_stappen.varValue * stapgroottes[i])) if aantal_stappen and aantal_stappen.varValue is not None else 0
+            if i in excluded_indices:
+                value = 0
             else:
-                value = int(toevoegingen[i].varValue) if toevoegingen[i].varValue is not None else 0
+                stapgrootte = stapgroottes[i]
+                if stapgrootte > 0:
+                    aantal_stappen = prob.variablesDict().get(f"steps_{i}")
+                    value = int(round(aantal_stappen.varValue * stapgrootte)) if aantal_stappen and aantal_stappen.varValue is not None else 0
+                else:
+                    value = int(toevoegingen[i].varValue) if toevoegingen[i].varValue is not None else 0
             optimized_toevoegingen.append(value)
         optimized_toevoegingen = np.array(optimized_toevoegingen, dtype=int)
         optimized_totale_massa = massa_product + sum(optimized_toevoegingen)
@@ -354,62 +378,164 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
         fail_msg = f"Optimalisatie mislukt: {LpStatus[prob.status]}. Targets:\n" + "\n".join(diagnostics)
         return None, None, fail_msg
     
+# Initialisatie van session state
+if 'excluded_indices' not in st.session_state:
+    st.session_state.excluded_indices = []
+if 'optimized_resultaten' not in st.session_state:
+    st.session_state.optimized_resultaten = None
+if 'optimized_status' not in st.session_state:
+    st.session_state.optimized_status = None
+if 'optimized_totale_massa' not in st.session_state:
+    st.session_state.optimized_totale_massa = None
+if 'optimized_toevoegingen' not in st.session_state:
+    st.session_state.optimized_toevoegingen = None
+
 # Knop voor optimalisatie
 st.header("Geoptimaliseerde Toevoegingen")
 if st.button("Bereken Geoptimaliseerde Toevoegingen", help="Klik om de optimalisatie te starten op basis van de ingevoerde concentraties."):
     with st.spinner("Optimalisatie wordt uitgevoerd..."):
         stapgroottes = [st.session_state.stapgroottes[grondstof] for grondstof in df['Grondstof']]
         optimized_toevoegingen, optimized_totale_massa, status = optimize_toevoegingen(
-            massa_product, df['Actuele_Hoeveelheid_Element'].values, df['Ratio_Element'].values,
-            df['Eenheid'].values, df['Min'].values, df['Max'].values, df['Spec'].values,
-            use_max_volume, max_volume_liters, stapgroottes, mass_priority, specs_priority
+            massa_product, 
+            df['Actuele_Hoeveelheid_Element'].values, 
+            df['Ratio_Element'].values,
+            df['Eenheid'].values, 
+            df['Min'].values, 
+            df['Max'].values, 
+            df['Spec'].values,
+            use_max_volume, 
+            max_volume_liters, 
+            stapgroottes, 
+            mass_priority, 
+            specs_priority,
+            excluded_indices=[]  # Geen exclusies voor originele optimalisatie
         )
         if status == "Succes":
             df['Toevoegen Grondstof'] = optimized_toevoegingen
             df['Geoptimaliseerde_Toegevoegd_Element'] = df.apply(bereken_toegevoegd_element, axis=1)
             df['Na Optimalisatie'] = df.apply(bereken_gecorrigeerde_concentratie, axis=1, totale_massa_correctie=optimized_totale_massa)
             df['Geoptimaliseerde_Binnen_Specs'] = (df['Na Optimalisatie'] >= df['Min']) & (df['Na Optimalisatie'] <= df['Max'])
-            totale_toevoeging = optimized_totale_massa - massa_product
-            percentage_toename = (totale_toevoeging / massa_product) * 100 if massa_product > 0 else 0
-            st.success(f"Optimalisatie succesvol! Totale massa na correctie: **{optimized_totale_massa:.2f} kg** (toevoeging: **{totale_toevoeging:.2f} kg**, {percentage_toename:.2f}% toename)")
-            def highlight_specs(val):
-                color = 'green' if val else 'red'
-                return f'background-color: {color}'
-            def format_number(val, eenheid):
-                if eenheid == 'mg/kg' or val == 0:
-                    return '{:.0f}'.format(val)
-                return '{:.3f}'.format(val).rstrip('0').rstrip('.')
-            format_dict = {
-                'Toevoegen Grondstof': '{:.0f}',
-                'Gemeten_Concentratie': lambda x: '{:.2f}'.format(x),
-                'Na Optimalisatie': lambda x: '{:.2f}'.format(x),
-                'Spec': lambda x: format_number(x, df.loc[df['Spec'] == x, 'Eenheid'].iloc[0] if not df.loc[df['Spec'] == x, 'Eenheid'].empty else 'wt%'),
-                'Min': lambda x: format_number(x, df.loc[df['Min'] == x, 'Eenheid'].iloc[0] if not df.loc[df['Min'] == x, 'Eenheid'].empty else 'wt%'),
-                'Max': lambda x: format_number(x, df.loc[df['Max'] == x, 'Eenheid'].iloc[0] if not df.loc[df['Max'] == x, 'Eenheid'].empty else 'wt%')
-            }
-            optimized_resultaten = df[['Grondstof', 'Element', 'Gemeten_Concentratie', 'Toevoegen Grondstof', 'Na Optimalisatie', 'Spec', 'Min', 'Max', 'Geoptimaliseerde_Binnen_Specs']]
-            st.dataframe(optimized_resultaten.style.applymap(highlight_specs, subset=['Geoptimaliseerde_Binnen_Specs']).format(format_dict))
-            st.subheader("Waarschuwingen")
-            warnings_present = False
-            for index, row in df.iterrows():
-                if not row['Geoptimaliseerde_Binnen_Specs'] and row['Element'] != 'Geen':
-                    st.warning(f"{row['Element']} ({row['Na Optimalisatie']:.2f} {row['Eenheid']}) ligt buiten specificaties ({row['Min']} - {row['Max']})")
-                    warnings_present = True
-            if not warnings_present:
-                st.success("Alle concentraties liggen binnen de specificaties!")
-            st.subheader("Visualisatie van Concentratievergelijking")
-            viz_df = df.melt(id_vars=['Element', 'Eenheid', 'Min', 'Max'], value_vars=['Gemeten_Concentratie', 'Na Optimalisatie', 'Spec'], var_name='Type', value_name='Waarde')
-            viz_df['Error_Low'] = viz_df['Waarde'] - viz_df['Min']
-            viz_df['Error_High'] = viz_df['Max'] - viz_df['Waarde']
-            fig = px.bar(viz_df, x='Element', y='Waarde', color='Type', barmode='group', facet_col='Eenheid',
-                         error_y='Error_High', error_y_minus='Error_Low',
-                         title='Vergelijking van Concentratie: Gemeten vs Geoptimaliseerd vs Specificaties (Gescheiden per Eenheid)',
-                         labels={'Waarde': 'Concentratie', 'Element': 'Element'})
-            fig.update_layout(height=500)
-            st.plotly_chart(fig, use_container_width=True)
-            csv = optimized_resultaten.to_csv(index=False).encode('utf-8')
-            st.download_button(label="Download Resultaten als CSV", data=csv, file_name=f'geoptimaliseerde_correctie_{recept}_{tank}.csv', mime='text/csv', help="Download de geoptimaliseerde resultaten als CSV-bestand.")
+            st.session_state.optimized_resultaten = df[['Grondstof', 'Element', 'Gemeten_Concentratie', 'Toevoegen Grondstof', 'Na Optimalisatie', 'Spec', 'Min', 'Max', 'Geoptimaliseerde_Binnen_Specs', 'Eenheid']].copy()
+            st.session_state.optimized_status = status
+            st.session_state.optimized_totale_massa = optimized_totale_massa
+            st.session_state.optimized_toevoegingen = optimized_toevoegingen
         else:
-            st.error(status)
+            st.session_state.optimized_status = status
+
+# Toon originele resultaten als ze beschikbaar zijn
+if st.session_state.optimized_status == "Succes" and st.session_state.optimized_resultaten is not None:
+    def highlight_specs(val):
+        color = 'green' if val else 'red'
+        return f'background-color: {color}'
+    
+    def format_number(val, eenheid):
+        if eenheid == 'mg/kg' or val == 0:
+            return '{:.0f}'.format(val)
+        return '{:.3f}'.format(val).rstrip('0').rstrip('.')
+    
+    format_dict = {
+        'Toevoegen Grondstof': '{:.0f}',
+        'Gemeten_Concentratie': lambda x: '{:.2f}'.format(x),
+        'Na Optimalisatie': lambda x: '{:.2f}'.format(x),
+        'Spec': lambda x: format_number(x, st.session_state.optimized_resultaten.loc[st.session_state.optimized_resultaten['Spec'] == x, 'Eenheid'].iloc[0] if not st.session_state.optimized_resultaten.loc[st.session_state.optimized_resultaten['Spec'] == x, 'Eenheid'].empty else 'wt%'),
+        'Min': lambda x: format_number(x, st.session_state.optimized_resultaten.loc[st.session_state.optimized_resultaten['Min'] == x, 'Eenheid'].iloc[0] if not st.session_state.optimized_resultaten.loc[st.session_state.optimized_resultaten['Min'] == x, 'Eenheid'].empty else 'wt%'),
+        'Max': lambda x: format_number(x, st.session_state.optimized_resultaten.loc[st.session_state.optimized_resultaten['Max'] == x, 'Eenheid'].iloc[0] if not st.session_state.optimized_resultaten.loc[st.session_state.optimized_resultaten['Max'] == x, 'Eenheid'].empty else 'wt%')
+    }
+    
+    totale_toevoeging = st.session_state.optimized_totale_massa - massa_product
+    percentage_toename = (totale_toevoeging / massa_product) * 100 if massa_product > 0 else 0
+    st.success(f"Optimalisatie succesvol! Totale massa na correctie: **{st.session_state.optimized_totale_massa:.2f} kg** (toevoeging: **{totale_toevoeging:.2f} kg**, {percentage_toename:.2f}% toename)")
+    
+    st.dataframe(st.session_state.optimized_resultaten.style.applymap(highlight_specs, subset=['Geoptimaliseerde_Binnen_Specs']).format(format_dict))
+    
+    st.subheader("Waarschuwingen")
+    warnings_present = False
+    for index, row in st.session_state.optimized_resultaten.iterrows():
+        if not row['Geoptimaliseerde_Binnen_Specs'] and row['Element'] != 'Geen':
+            st.warning(f"{row['Element']} ({row['Na Optimalisatie']:.2f} {row['Eenheid']}) ligt buiten specificaties ({row['Min']} - {row['Max']})")
+            warnings_present = True
+    if not warnings_present:
+        st.success("Alle concentraties liggen binnen de specificaties!")
+    
+    csv = st.session_state.optimized_resultaten.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="Download Resultaten als CSV",
+        data=csv,
+        file_name=f'geoptimaliseerde_correctie_{recept}_{tank}.csv',
+        mime='text/csv',
+        help="Download de geoptimaliseerde resultaten als CSV-bestand."
+    )
+
+elif st.session_state.optimized_status is not None:
+    st.error(st.session_state.optimized_status)
 else:
     st.info("Klik op de knop om de optimalisatie te starten.")
+
+# Aangepaste Correctie Sectie
+st.subheader("Aangepaste Correctie (Excluden Grondstoffen)")
+if st.session_state.optimized_toevoegingen is not None:
+    excluded_indices = []
+    toevoegingen_present = False
+    for i, toevoeging in enumerate(st.session_state.optimized_toevoegingen):
+        grondstof = df['Grondstof'][i]
+        if toevoeging > 0:
+            toevoegingen_present = True
+            if not st.checkbox(f"Include {grondstof} ({toevoeging} kg)", value=True, key=f"exclude_{recept}_{tank}_{grondstof}_{i}"):
+                excluded_indices.append(i)
+    st.session_state.excluded_indices = excluded_indices
+
+    if toevoegingen_present and st.button("Herbereken Zonder Geselecteerde Grondstoffen", help="Herbereken optimalisatie zonder de uitgeschakelde grondstoffen"):
+        with st.spinner("Aangepaste optimalisatie wordt uitgevoerd..."):
+            adj_df = df.copy()
+            stapgroottes = [st.session_state.stapgroottes[grondstof] for grondstof in adj_df['Grondstof']]
+            adj_optimized_toevoegingen, adj_optimized_totale_massa, adj_status = optimize_toevoegingen(
+                massa_product, 
+                adj_df['Actuele_Hoeveelheid_Element'].values, 
+                adj_df['Ratio_Element'].values,
+                adj_df['Eenheid'].values, 
+                adj_df['Min'].values, 
+                adj_df['Max'].values, 
+                adj_df['Spec'].values,
+                use_max_volume, 
+                max_volume_liters, 
+                stapgroottes, 
+                mass_priority, 
+                specs_priority,
+                excluded_indices=st.session_state.excluded_indices
+            )
+            if adj_status == "Succes":
+                adj_df['Toevoegen Grondstof'] = adj_optimized_toevoegingen
+                adj_df['Geoptimaliseerde_Toegevoegd_Element'] = adj_df.apply(bereken_toegevoegd_element, axis=1)
+                adj_df['Na Optimalisatie'] = adj_df.apply(bereken_gecorrigeerde_concentratie, axis=1, totale_massa_correctie=adj_optimized_totale_massa)
+                adj_df['Geoptimaliseerde_Binnen_Specs'] = (adj_df['Na Optimalisatie'] >= adj_df['Min']) & (adj_df['Na Optimalisatie'] <= adj_df['Max'])
+                adj_totale_toevoeging = adj_optimized_totale_massa - massa_product
+                adj_percentage_toename = (adj_totale_toevoeging / massa_product) * 100 if massa_product > 0 else 0
+                st.success(f"Aangepaste optimalisatie succesvol! Totale massa na correctie: **{adj_optimized_totale_massa:.2f} kg** (toevoeging: **{adj_totale_toevoeging:.2f} kg**, {adj_percentage_toename:.2f}% toename)")
+                
+                adj_optimized_resultaten = adj_df[['Grondstof', 'Element', 'Gemeten_Concentratie', 'Toevoegen Grondstof', 'Na Optimalisatie', 'Spec', 'Min', 'Max', 'Geoptimaliseerde_Binnen_Specs', 'Eenheid']]
+                st.dataframe(
+                    adj_optimized_resultaten.style.applymap(highlight_specs, subset=['Geoptimaliseerde_Binnen_Specs']).format(format_dict)
+                )
+                
+                st.subheader("Aangepaste Waarschuwingen")
+                warnings_present = False
+                for index, row in adj_optimized_resultaten.iterrows():
+                    if not row['Geoptimaliseerde_Binnen_Specs'] and row['Element'] != 'Geen':
+                        st.warning(f"{row['Element']} ({row['Na Optimalisatie']:.2f} {row['Eenheid']}) ligt buiten specificaties ({row['Min']} - {row['Max']})")
+                        warnings_present = True
+                if not warnings_present:
+                    st.success("Alle concentraties liggen binnen de specificaties!")
+                
+                csv = adj_optimized_resultaten.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="Download Aangepaste Resultaten als CSV",
+                    data=csv,
+                    file_name=f'aangepaste_correctie_{recept}_{tank}.csv',
+                    mime='text/csv',
+                    help="Download de aangepaste geoptimaliseerde resultaten als CSV-bestand."
+                )
+            else:
+                st.error(f"Aangepaste optimalisatie mislukt: {adj_status}")
+                st.warning("Controleer de console voor gedetailleerde diagnostics van de optimalisatie.")
+else:
+    st.info("Geen optimalisatieresultaten beschikbaar. Voer eerst de originele optimalisatie uit.")
