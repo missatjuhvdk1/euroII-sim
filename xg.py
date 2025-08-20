@@ -289,7 +289,7 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
 
     # Scale weights
     mass_penalty = mass_weight * 100
-    deviation_weight = specs_weight * 10000
+    deviation_weight = specs_weight * 35000
 
     # Objective
     costs = [st.session_state.kosten[df['Grondstof'][i]] for i in range(len(ratios))]
