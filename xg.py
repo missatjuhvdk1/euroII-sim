@@ -1,9 +1,13 @@
+import io
 import streamlit as st
 import pandas as pd
 import numpy as np
 from pulp import LpProblem, LpMinimize, LpVariable, lpSum, LpStatus, PULP_CBC_CMD
 import plotly.express as px
 import json
+
+# Set page configuration for wide mode at the start
+st.set_page_config(layout="wide")
 
 # Load recepten from JSON with fallback to hardcoded for robustness
 try:
@@ -93,7 +97,7 @@ with st.expander("Algemene Gegevens", expanded=True):
 # Toggle voor Max_Volume constraint
 col_max_vol1, col_max_vol2 = st.columns([1, 2])
 with col_max_vol1:
-    use_max_volume = st.checkbox("Gebruik Max. Volume beperking", value=False, help="Schakel uit om de maximale volumebeperking te negeren.")
+    use_max_volume = st.checkbox("Gebruik Max. Volume beperking", value=True, help="Schakel uit om de maximale volumebeperking te negeren.")
 with col_max_vol2:
     default_max_volume_m3 = tanks[tank]["Max_Volume_m3"]
     max_volume_m3 = st.number_input(
@@ -116,7 +120,7 @@ if ('stapgroottes' not in st.session_state or
     st.session_state.get('current_recept') != recept or
     st.session_state.get('current_tank') != tank):
     st.session_state.stapgroottes = {
-        row['Grondstof']: 0  # Default step size is 0 for all groundstoffen
+        row['Grondstof']: 0  # Default step size is 0 for all grondstoffen
         for _, row in df.iterrows()
     }
     st.session_state.kosten = {
@@ -133,7 +137,7 @@ with st.expander("Gemeten Concentratie per Element", expanded=True):
     for idx, row in df.iterrows():
         element = row['Element']
         eenheid = row['Eenheid']
-        default_conc = row['Gemeten_Concentratie']
+        default_conc = row['Gemeten_Concentratie']  # From recepten data
         if element != 'Geen':
             conc = st.number_input(
                 f"{element} ({eenheid}) voor {row['Grondstof']}",
@@ -156,37 +160,40 @@ with st.expander("Gemeten Concentratie per Element", expanded=True):
 
 # Optimalisatie Penalties
 with st.expander("Optimalisatie Penalties", expanded=True):
-    st.info("Stel de verhouding in tussen de penalties voor massaminimalisatie en specificatie afwijkingen. De slider bepaalt de verhouding, waarbij beide penalties bij 1:1 starten op 10000.0.")
+    st.info("Stel de verhouding in tussen de penalties voor massaminimalisatie en specificatie afwijkingen. De slider bepaalt de verhouding. Standaard is 1:10")
 
     # Initialize session state if not already set
     if 'ratio_log' not in st.session_state:
-        st.session_state.ratio_log = 1.0
+        st.session_state.ratio_log = 1.0  # Default to 1:1 ratio
     if 'mass_penalty' not in st.session_state:
         st.session_state.mass_penalty = 10000.0
     if 'deviation_weight' not in st.session_state:
         st.session_state.deviation_weight = 10000.0
 
     # Reset button for penalties
-    if st.button("Reset Penalties naar Standaard", help="Herstel de standaard penalties (verhouding 1:1, beide penalties op 10000.0)"):
+    if st.button("Reset Penalties naar Standaard", help="Herstel de standaard penalties (verhouding 1:1)"):
         st.session_state.ratio_log = 1.0
         st.session_state.mass_penalty = 10000.0
         st.session_state.deviation_weight = 10000.0
-        st.session_state.ratio_slider = 1.0  # Sync the slider's session state
 
-    # Ratio slider, using session_state.ratio_log as the value
+    # Ratio slider with explicit callback to update session state
+    def update_ratio():
+        st.session_state.ratio_log = st.session_state.ratio_slider
+
     ratio_log = st.slider(
         "Straf Verhouding (Massaminimalisatie : Specificatie Afwijkingen)",
-        min_value=0.0,  # Represents 1:100 (log10(0.01))
+        min_value=0.0,  # Represents 1:1 (log10(1))
         max_value=2.0,  # Represents 100:1 (log10(100))
         value=st.session_state.ratio_log,  # Use session state for slider value
         step=0.1,
-        format="%.2f",
+        format="%.1f",
         key="ratio_slider",
-        help="Verplaatst de slider om de verhouding tussen massaminimalisatie en specificatie afwijkingen aan te passen. 0.0 = 1:1 (beide 10000.0), -2.0 = 1:100, 2.0 = 100:1."
+        on_change=update_ratio,  # Update session state on slider change
+        help="Verplaatst de slider om de verhouding tussen massaminimalisatie en specificatie afwijkingen aan te passen. 0.0 = 1:1, 1.0 = 10:1, 2.0 = 100:1."
     )
 
     # Calculate penalties based on the ratio
-    ratio = 10 ** ratio_log  # Convert log value to actual ratio
+    ratio = 10 ** st.session_state.ratio_log  # Use session state directly
     base_penalty = 10000.0
 
     # Mass penalty is base_penalty, deviation penalty is base_penalty * ratio
@@ -198,16 +205,8 @@ with st.expander("Optimalisatie Penalties", expanded=True):
     deviation_weight = max(0.0, min(deviation_weight, 1000000.0))
 
     # Update session state
-    st.session_state.ratio_log = ratio_log
     st.session_state.mass_penalty = mass_penalty
     st.session_state.deviation_weight = deviation_weight
-
-    # Display the calculated penalties
-    col_mass, col_specs = st.columns(2)
-    with col_mass:
-        st.metric("Penalty voor Massaminimalisatie", f"{mass_penalty:.1f}")
-    with col_specs:
-        st.metric("Penalty voor Specificatie Afwijkingen", f"{deviation_weight:.1f}")
 
 # Reset session state bij wijziging van recept of tank
 if ('current_recept' not in st.session_state or st.session_state.current_recept != recept or
@@ -223,47 +222,29 @@ if ('current_recept' not in st.session_state or st.session_state.current_recept 
     st.session_state.current_recept = recept
     st.session_state.current_tank = tank
 
-# Stapgroottes en Kosten sectie
-with st.expander("Stapgroottes en Kosten", expanded=False):
-    st.info("Voer de stapgroottes (in kg) en kosten (voor prioriteit) in. Stapgrootte 0 betekent geen stappen. Lagere kosten geven hogere prioriteit.")
-    if st.button("Reset Kosten naar Standaard", help="Herstel standaard kosten (Demiwater: 0.01, overige: 1.0)"):
-        for grondstof in df['Grondstof']:
-            st.session_state.kosten[grondstof] = 0.01 if grondstof == 'Demiwater' else 1.0
+# Stapgroottes sectie
+with st.expander("Stapgroottes", expanded=False):
+    st.info("Voer de stapgroottes (in kg) in. Stapgrootte 0 betekent geen stappen.")
     for idx, row in df.iterrows():
         grondstof = row['Grondstof']
-        col_step, col_cost = st.columns(2)
-        with col_step:
-            default_step = tanks[tank]["Stapgrootte"].get(grondstof, 0)
-            step_value = st.number_input(
-                f"Stapgrootte (kg) voor {grondstof}",
-                value=st.session_state.stapgroottes.get(grondstof, default_step),
-                step=1,
-                min_value=0,
-                key=f"step_{recept}_{tank}_{grondstof}_{idx}",  # Unieke sleutel met idx
-                help=f"Stapgrootte voor {grondstof} in kg (0 voor geen stappen, standaard: {default_step} kg)."
-            )
-            st.session_state.stapgroottes[grondstof] = int(step_value)
-        with col_cost:
-            default_cost = st.session_state.kosten.get(grondstof, 0.01 if grondstof == 'Demiwater' else 1.0)
-            cost_value = st.number_input(
-                f"Kosten (prioriteit) voor {grondstof}",
-                value=default_cost,
-                step=0.01,
-                min_value=0.01,
-                format="%.2f",
-                key=f"cost_{recept}_{tank}_{grondstof}_{idx}",  # Unieke sleutel met idx
-                help=f"Kosten voor {grondstof}. Lagere kosten geven hogere prioriteit (bijv. 0.01 voor voorkeur, 1.0 voor standaard, >1.0 voor lage prioriteit)."
-            )
-            st.session_state.kosten[grondstof] = float(cost_value)
+        step_value = st.number_input(
+            f"Stapgrootte (kg) voor {grondstof}",
+            value=st.session_state.stapgroottes.get(grondstof, 0),  # Default to 0
+            step=1,
+            min_value=0,
+            key=f"step_{recept}_{tank}_{grondstof}_{idx}",  # Unique key with idx
+            help=f"Stapgrootte voor {grondstof} in kg (0 voor geen stappen)."
+        )
+        st.session_state.stapgroottes[grondstof] = int(step_value)
 
 # Update DataFrame met ingevoerde concentraties
-df['Gemeten_Concentratie'] = df['Element'].map(measured_concentrations)
+df['Gemeten Concentratie'] = df['Element'].map(measured_concentrations)
 
 # Berekeningen zoals in Excel
 def bereken_actuele_hoeveelheid_element(row, massa_product):
     """Berekening kolom F: Actuele hoeveelheid element in kg."""
     conversie_factor = 100 if row['Eenheid'] == 'wt%' else 1000000
-    return (massa_product * row['Gemeten_Concentratie']) / conversie_factor
+    return (massa_product * row['Gemeten Concentratie']) / conversie_factor
 
 def bereken_actuele_hoeveelheid_grondstof(row):
     """Berekening kolom G: Actuele hoeveelheid grondstof in kg."""
@@ -414,6 +395,12 @@ if 'optimized_toevoegingen' not in st.session_state:
 st.header("Geoptimaliseerde Toevoegingen")
 if st.button("Bereken Geoptimaliseerde Toevoegingen", help="Klik om de optimalisatie te starten op basis van de ingevoerde concentraties."):
     with st.spinner("Optimalisatie wordt uitgevoerd..."):
+        # Clear previous optimization results to avoid stale data
+        st.session_state.optimized_resultaten = None
+        st.session_state.optimized_status = None
+        st.session_state.optimized_totale_massa = None
+        st.session_state.optimized_toevoegingen = None
+        
         stapgroottes = [st.session_state.stapgroottes[grondstof] for grondstof in df['Grondstof']]
         optimized_toevoegingen, optimized_totale_massa, status = optimize_toevoegingen(
             massa_product, 
@@ -434,8 +421,8 @@ if st.button("Bereken Geoptimaliseerde Toevoegingen", help="Klik om de optimalis
             df['Toevoegen Grondstof'] = optimized_toevoegingen
             df['Geoptimaliseerde_Toegevoegd_Element'] = df.apply(bereken_toegevoegd_element, axis=1)
             df['Na Optimalisatie'] = df.apply(bereken_gecorrigeerde_concentratie, axis=1, totale_massa_correctie=optimized_totale_massa)
-            df['Geoptimaliseerde_Binnen_Specs'] = (df['Na Optimalisatie'] >= df['Min']) & (df['Na Optimalisatie'] <= df['Max'])
-            st.session_state.optimized_resultaten = df[['Grondstof', 'Element', 'Gemeten_Concentratie', 'Toevoegen Grondstof', 'Na Optimalisatie', 'Spec', 'Min', 'Max', 'Geoptimaliseerde_Binnen_Specs', 'Eenheid']].copy()
+            df['Binnen Specs'] = (df['Na Optimalisatie'] >= df['Min']) & (df['Na Optimalisatie'] <= df['Max'])
+            st.session_state.optimized_resultaten = df[['Grondstof', 'Element', 'Gemeten Concentratie', 'Toevoegen Grondstof', 'Na Optimalisatie', 'Spec', 'Min', 'Max', 'Binnen Specs', 'Eenheid']].copy()
             st.session_state.optimized_status = status
             st.session_state.optimized_totale_massa = optimized_totale_massa
             st.session_state.optimized_toevoegingen = optimized_toevoegingen
@@ -453,9 +440,14 @@ if st.session_state.optimized_status == "Succes" and st.session_state.optimized_
             return '{:.0f}'.format(val)
         return '{:.3f}'.format(val).rstrip('0').rstrip('.')
     
+    def format_toevoegen_grondstof(val):
+        if val < 10:
+            return '{:.1f}'.format(val)
+        return '{:.0f}'.format(val)
+    
     format_dict = {
-        'Toevoegen Grondstof': '{:.0f}',
-        'Gemeten_Concentratie': lambda x: '{:.2f}'.format(x),
+        'Toevoegen Grondstof': format_toevoegen_grondstof,
+        'Gemeten Concentratie': lambda x: '{:.2f}'.format(x),
         'Na Optimalisatie': lambda x: '{:.2f}'.format(x),
         'Spec': lambda x: format_number(x, st.session_state.optimized_resultaten.loc[st.session_state.optimized_resultaten['Spec'] == x, 'Eenheid'].iloc[0] if not st.session_state.optimized_resultaten.loc[st.session_state.optimized_resultaten['Spec'] == x, 'Eenheid'].empty else 'wt%'),
         'Min': lambda x: format_number(x, st.session_state.optimized_resultaten.loc[st.session_state.optimized_resultaten['Min'] == x, 'Eenheid'].iloc[0] if not st.session_state.optimized_resultaten.loc[st.session_state.optimized_resultaten['Min'] == x, 'Eenheid'].empty else 'wt%'),
@@ -466,45 +458,45 @@ if st.session_state.optimized_status == "Succes" and st.session_state.optimized_
     percentage_toename = (totale_toevoeging / massa_product) * 100 if massa_product > 0 else 0
     st.success(f"Optimalisatie succesvol! Totale massa na correctie: **{st.session_state.optimized_totale_massa:.2f} kg** (toevoeging: **{totale_toevoeging:.2f} kg**, {percentage_toename:.2f}% toename)")
     
-    st.dataframe(st.session_state.optimized_resultaten.style.applymap(highlight_specs, subset=['Geoptimaliseerde_Binnen_Specs']).format(format_dict))
+    st.dataframe(st.session_state.optimized_resultaten.style.applymap(highlight_specs, subset=['Binnen Specs']).format(format_dict))
     
     st.subheader("Waarschuwingen")
     warnings_present = False
     for index, row in st.session_state.optimized_resultaten.iterrows():
-        if not row['Geoptimaliseerde_Binnen_Specs'] and row['Element'] != 'Geen':
+        if not row['Binnen Specs'] and row['Element'] != 'Geen':
             st.warning(f"{row['Element']} ({row['Na Optimalisatie']:.2f} {row['Eenheid']}) ligt buiten specificaties ({row['Min']} - {row['Max']})")
             warnings_present = True
     if not warnings_present:
         st.success("Alle concentraties liggen binnen de specificaties!")
     
-    csv = st.session_state.optimized_resultaten.to_csv(index=False).encode('utf-8')
+    # Export button for original results (Excel only)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        st.session_state.optimized_resultaten.to_excel(writer, index=False, sheet_name='Resultaten')
+    excel_data = output.getvalue()
     st.download_button(
-        label="Download Resultaten als CSV",
-        data=csv,
-        file_name=f'geoptimaliseerde_correctie_{recept}_{tank}.csv',
-        mime='text/csv',
-        help="Download de geoptimaliseerde resultaten als CSV-bestand."
+        label="Download Resultaten als Excel",
+        data=excel_data,
+        file_name=f'geoptimaliseerde_correctie_{recept}_{tank}.xlsx',
+        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        help="Download de geoptimaliseerde resultaten als Excel-bestand."
     )
 
-elif st.session_state.optimized_status is not None:
-    st.error(st.session_state.optimized_status)
-else:
-    st.info("Klik op de knop om de optimalisatie te starten.")
-
 # Aangepaste Correctie Sectie
-st.subheader("Aangepaste Correctie (Excluderen Grondstoffen)")
 if st.session_state.optimized_toevoegingen is not None:
     excluded_indices = []
-    toevoegingen_present = False
-    for i, toevoeging in enumerate(st.session_state.optimized_toevoegingen):
-        grondstof = df['Grondstof'][i]
-        if toevoeging > 0:
-            toevoegingen_present = True
-            if not st.checkbox(f"{grondstof} toevoegen ({toevoeging} kg)", value=True, key=f"exclude_{recept}_{tank}_{grondstof}_{i}"):
-                excluded_indices.append(i)
+    st.info("Selecteer de grondstoffen die je wilt toevoegen. Vink uit om te excluderen bij heroptimalisatie.")
+    for i, grondstof in enumerate(df['Grondstof']):
+        default_value = st.session_state.get(f"exclude_{recept}_{tank}_{grondstof}_{i}", True)
+        if not st.checkbox(
+            f"{grondstof} toevoegen",
+            value=default_value,
+            key=f"exclude_{recept}_{tank}_{grondstof}_{i}"
+        ):
+            excluded_indices.append(i)
     st.session_state.excluded_indices = excluded_indices
 
-    if toevoegingen_present and st.button("Herbereken Zonder Geselecteerde Grondstoffen", help="Herbereken optimalisatie zonder de uitgeschakelde grondstoffen"):
+    if st.button("Herbereken Zonder Geselecteerde Grondstoffen", help="Herbereken optimalisatie zonder de uitgeschakelde grondstoffen"):
         with st.spinner("Aangepaste optimalisatie wordt uitgevoerd..."):
             adj_df = df.copy()
             stapgroottes = [st.session_state.stapgroottes[grondstof] for grondstof in adj_df['Grondstof']]
@@ -527,35 +519,36 @@ if st.session_state.optimized_toevoegingen is not None:
                 adj_df['Toevoegen Grondstof'] = adj_optimized_toevoegingen
                 adj_df['Geoptimaliseerde_Toegevoegd_Element'] = adj_df.apply(bereken_toegevoegd_element, axis=1)
                 adj_df['Na Optimalisatie'] = adj_df.apply(bereken_gecorrigeerde_concentratie, axis=1, totale_massa_correctie=adj_optimized_totale_massa)
-                adj_df['Geoptimaliseerde_Binnen_Specs'] = (adj_df['Na Optimalisatie'] >= adj_df['Min']) & (adj_df['Na Optimalisatie'] <= adj_df['Max'])
+                adj_df['Binnen Specs'] = (adj_df['Na Optimalisatie'] >= adj_df['Min']) & (adj_df['Na Optimalisatie'] <= adj_df['Max'])
                 adj_totale_toevoeging = adj_optimized_totale_massa - massa_product
                 adj_percentage_toename = (adj_totale_toevoeging / massa_product) * 100 if massa_product > 0 else 0
                 st.success(f"Aangepaste optimalisatie succesvol! Totale massa na correctie: **{adj_optimized_totale_massa:.2f} kg** (toevoeging: **{adj_totale_toevoeging:.2f} kg**, {adj_percentage_toename:.2f}% toename)")
                 
-                adj_optimized_resultaten = adj_df[['Grondstof', 'Element', 'Gemeten_Concentratie', 'Toevoegen Grondstof', 'Na Optimalisatie', 'Spec', 'Min', 'Max', 'Geoptimaliseerde_Binnen_Specs', 'Eenheid']]
+                adj_optimized_resultaten = adj_df[['Grondstof', 'Element', 'Gemeten Concentratie', 'Toevoegen Grondstof', 'Na Optimalisatie', 'Spec', 'Min', 'Max', 'Binnen Specs', 'Eenheid']]
                 st.dataframe(
-                    adj_optimized_resultaten.style.applymap(highlight_specs, subset=['Geoptimaliseerde_Binnen_Specs']).format(format_dict)
+                    adj_optimized_resultaten.style.applymap(highlight_specs, subset=['Binnen Specs']).format(format_dict)
                 )
                 
                 st.subheader("Aangepaste Waarschuwingen")
                 warnings_present = False
                 for index, row in adj_optimized_resultaten.iterrows():
-                    if not row['Geoptimaliseerde_Binnen_Specs'] and row['Element'] != 'Geen':
+                    if not row['Binnen Specs'] and row['Element'] != 'Geen':
                         st.warning(f"{row['Element']} ({row['Na Optimalisatie']:.2f} {row['Eenheid']}) ligt buiten specificaties ({row['Min']} - {row['Max']})")
                         warnings_present = True
                 if not warnings_present:
                     st.success("Alle concentraties liggen binnen de specificaties!")
                 
-                csv = adj_optimized_resultaten.to_csv(index=False).encode('utf-8')
+                # Export button for adjusted results (Excel only)
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    adj_optimized_resultaten.to_excel(writer, index=False, sheet_name='Aangepaste_Resultaten')
+                excel_data = output.getvalue()
                 st.download_button(
-                    label="Download Aangepaste Resultaten als CSV",
-                    data=csv,
-                    file_name=f'aangepaste_correctie_{recept}_{tank}.csv',
-                    mime='text/csv',
-                    help="Download de aangepaste geoptimaliseerde resultaten als CSV-bestand."
+                    label="Download Aangepaste Resultaten als Excel",
+                    data=excel_data,
+                    file_name=f'aangepaste_correctie_{recept}_{tank}.xlsx',
+                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    help="Download de aangepaste geoptimaliseerde resultaten als Excel-bestand."
                 )
-            else:
-                st.error(f"Aangepaste optimalisatie mislukt: {adj_status}")
-                st.warning("Controleer de console voor gedetailleerde diagnostics van de optimalisatie.")
 else:
     st.info("Geen optimalisatieresultaten beschikbaar. Voer eerst de originele optimalisatie uit.")
