@@ -15,56 +15,7 @@ try:
         recepten = json.load(f)
 except (FileNotFoundError, json.JSONDecodeError):
     st.error("Error loading recepten.json. Falling back to hardcoded data.")
-    recepten = {
-        "Zero Waste Solution A": {
-            "Hoeveelheid": 1100.0,
-            "Dichtheid": 1.307,
-            "Max_Volume": None,
-            "Data": {
-                'Grondstof': ['Fosforzuur 75%', 'Magnesiumchloride', 'Yzerchloride', 'Cobaltsulfaat oplossing', 'Nikkelsulfaat oplossing', 'Demiwater'],
-                'Element': ['P2O5', 'MgO', 'Fe', 'Co', 'Ni', 'Geen'],
-                'Gemeten_Concentratie': [23.7, 2.7, 1.17, 105, 200, 0],
-                'Eenheid': ['wt%', 'wt%', 'wt%', 'mg/kg', 'mg/kg', 'wt%'],
-                'Spec': [25, 3, 1.175, 110, 220, 0],
-                'Min': [24.2, 2.7, 1.1, 90, 190, 0],
-                'Max': [25.8, 3.3, 1.25, 130, 250, 0],
-                'Concentratie_Grondstof': [74.9, 19.7, 13.7, 8.2, 6.4, 0],
-                'Ratio_Element': [0.5424258, 0.197, 0.137, 0.082, 0.064, 0]
-            }
-        },
-        "DKP 0-20-25": {
-            "Hoeveelheid": 14100.0,
-            "Dichtheid": 1.503,
-            "Max_Volume": 27.33,
-            "Data": {
-                'Grondstof': ['Fosforzuur 75%', 'Kaliloog 50%', 'Demiwater'],
-                'Element': ['P2O5', 'K2O', 'Geen'],
-                'Gemeten_Concentratie': [18.2, 25.4, 0],
-                'Eenheid': ['wt%', 'wt%', 'wt%'],
-                'Spec': [20.25, 25.25, 0],
-                'Min': [19.5, 24.5, 0],
-                'Max': [21, 26, 0],
-                'Concentratie_Grondstof': [75, 50.3, 0],
-                'Ratio_Element': [0.54315, 0.4222685, 0]
-            }
-        },
-        "PB Bravo": {
-            "Hoeveelheid": 24000.0,
-            "Dichtheid": 1.295,
-            "Max_Volume": 18.0,
-            "Data": {
-                'Grondstof': ['Ureum prills', 'Zwavelzuur 96%', 'Demiwater'],
-                'Element': ['N-Ureum', 'SO3', 'Geen'],
-                'Gemeten_Concentratie': [19.4, 13.9, 0],
-                'Eenheid': ['wt%', 'wt%', 'wt%'],
-                'Spec': [22, 10, 0],
-                'Min': [21.4, 9.1, 0],
-                'Max': [22.6, 10.9, 0],
-                'Concentratie_Grondstof': [46, 78.36, 0],
-                'Ratio_Element': [0.46, 0.7836, 0]
-            }
-        }
-    }
+    st.stop
 
 # Load tanks from JSON (no fallback)
 try:
@@ -268,35 +219,52 @@ df['Actuele_Hoeveelheid_Element'] = df.apply(bereken_actuele_hoeveelheid_element
 # Bereken actuele hoeveelheid grondstof (kolom G)
 df['Actuele_Hoeveelheid_Grondstof'] = df.apply(bereken_actuele_hoeveelheid_grondstof, axis=1)
 
-def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden, min_specs, max_specs, specs, use_max_volume, max_volume, stapgroottes, mass_penalty, deviation_weight, excluded_indices=None):
+def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden, min_specs, max_specs, specs, use_max_volume, max_volume, stapgroottes, mass_penalty, deviation_weight, excluded_indices=None, fixed_values=None, refine=False):
     if excluded_indices is None:
         excluded_indices = []
+    if fixed_values is None:
+        fixed_values = {}
     if massa_product <= 0:
-        return np.zeros(len(ratios), dtype=int), massa_product, "Geen massa; geen optimalisatie nodig."
+        return np.zeros(len(ratios), dtype=float), massa_product, "Geen massa; geen optimalisatie nodig."
 
     prob = LpProblem("Minimize_Additions_And_Deviations", LpMinimize)
 
-    # Define variables for additions
+    # Define toevoegingen: variables or constants
     toevoegingen = {}
     for i in range(len(ratios)):
         if i in excluded_indices:
-            toevoegingen[i] = 0  # Fix excluded grondstoffen op 0
+            toevoegingen[i] = 0.0
+        elif i in fixed_values:
+            toevoegingen[i] = fixed_values[i]
         else:
-            stapgrootte = stapgroottes[i]
-            if stapgrootte > 0:
-                aantal_stappen = LpVariable(f"steps_{i}", lowBound=0, cat='Integer')
-                toevoegingen[i] = aantal_stappen * stapgrootte
+            if refine:
+                # Continuous for refinement
+                toevoegingen[i] = LpVariable(f"add_{i}", lowBound=0, cat='Continuous')
             else:
-                toevoegingen[i] = LpVariable(f"add_{i}", lowBound=0, cat='Integer')
+                stapgrootte = stapgroottes[i]
+                if stapgrootte > 0:
+                    aantal_stappen = LpVariable(f"steps_{i}", lowBound=0, cat='Integer')
+                    toevoegingen[i] = aantal_stappen * stapgrootte
+                else:
+                    toevoegingen[i] = LpVariable(f"add_{i}", lowBound=0, cat='Integer')
+
+    # Identify variables and fixed additions
+    var_toevoegingen = {i: t for i, t in toevoegingen.items() if isinstance(t, LpVariable)}
+    fixed_add_mass = sum([t for i, t in toevoegingen.items() if not isinstance(t, LpVariable)])
+    fixed_cost = sum([st.session_state.kosten[df['Grondstof'][i]] * toevoegingen[i] for i in toevoegingen if not isinstance(toevoegingen[i], LpVariable)])
 
     # Total mass
-    totale_massa = massa_product + lpSum(toevoegingen.values())
+    totale_massa = massa_product + fixed_add_mass + lpSum(var_toevoegingen.values())
 
     # Objective
     costs = [st.session_state.kosten[df['Grondstof'][i]] for i in range(len(ratios))]
-    objective = lpSum(costs[i] * toevoegingen[i] for i in range(len(ratios)))
-    objective += mass_penalty * lpSum(toevoegingen.values())
+    objective = fixed_cost + lpSum(costs[i] * var_toevoegingen[i] for i in var_toevoegingen)
+    objective += mass_penalty * (fixed_add_mass + lpSum(var_toevoegingen.values()))
     
+    # Effective initial for diagnostics
+    effective_massa = massa_product + fixed_add_mass
+    effective_actuele = [actuele_hoeveelheden[i] + (fixed_values.get(i, 0) if i in fixed_values else 0) * ratios[i] for i in range(len(ratios))]
+
     # Diagnostics and targets
     diagnostics = []
     target_set = []
@@ -306,7 +274,7 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
             diagnostics.append(f"{df['Element'][i]}: Excluded or no ratio, skipped")
             continue
         conversie_factor = 100 if eenheden[i] == 'wt%' else 1000000
-        current_conc = (actuele_hoeveelheden[i] / massa_product) * conversie_factor if massa_product > 0 else 0
+        current_conc = (effective_actuele[i] / effective_massa) * conversie_factor if effective_massa > 0 else 0
         if current_conc < specs[i]:
             target_set.append(i)
             target = (min_specs[i] + specs[i]) / 2
@@ -326,7 +294,7 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
     # Constraints and deviations
     for i in target_set:
         conversie_factor = 100 if eenheden[i] == 'wt%' else 1000000
-        totale_element = actuele_hoeveelheden[i] + toevoegingen[i] * ratios[i]
+        totale_element = effective_actuele[i] + toevoegingen[i] * ratios[i] - (fixed_values.get(i, 0) * ratios[i] if i in fixed_values else 0)
         target_element_mass = targets[i] * totale_massa / conversie_factor
         dev_plus = LpVariable(f"dev_plus_{i}", lowBound=0)
         dev_minus = LpVariable(f"dev_minus_{i}", lowBound=0)
@@ -338,7 +306,7 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
         if ratios[i] == 0 or i in excluded_indices:
             continue
         conversie_factor = 100 if eenheden[i] == 'wt%' else 1000000
-        totale_element = actuele_hoeveelheden[i] + toevoegingen[i] * ratios[i]
+        totale_element = effective_actuele[i] + toevoegingen[i] * ratios[i] - (fixed_values.get(i, 0) * ratios[i] if i in fixed_values else 0)
         min_element_mass = min_specs[i] * totale_massa / conversie_factor
         max_element_mass = max_specs[i] * totale_massa / conversie_factor
         prob += totale_element >= min_element_mass, f"Min_{i}"
@@ -348,6 +316,12 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
 
     # Volume constraint
     if use_max_volume and max_volume is not None and max_volume > 0:
+        effective_initial_volume = effective_massa / dichtheid
+        if effective_initial_volume > max_volume:
+            diagnostics.append(
+                f"Effectieve initiële massa ({effective_massa:.2f} kg) resulteert in een volume van {effective_initial_volume:.2f} liter, "
+                f"wat de maximale volumebeperking van {max_volume:.2f} liter overschrijdt."
+            )
         prob += totale_massa / dichtheid <= max_volume, "Max_Volume_Constraint"
 
     # Solve
@@ -356,17 +330,15 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
     if LpStatus[prob.status] == 'Optimal':
         optimized_toevoegingen = []
         for i in range(len(ratios)):
-            if i in excluded_indices:
-                value = 0
+            t = toevoegingen[i]
+            if isinstance(t, LpVariable):
+                value = t.varValue if t.varValue is not None else 0.0
+                if not refine and stapgroottes[i] > 0:
+                    value = round(value)
             else:
-                stapgrootte = stapgroottes[i]
-                if stapgrootte > 0:
-                    aantal_stappen = prob.variablesDict().get(f"steps_{i}")
-                    value = int(round(aantal_stappen.varValue * stapgrootte)) if aantal_stappen and aantal_stappen.varValue is not None else 0
-                else:
-                    value = int(toevoegingen[i].varValue) if toevoegingen[i].varValue is not None else 0
+                value = t
             optimized_toevoegingen.append(value)
-        optimized_toevoegingen = np.array(optimized_toevoegingen, dtype=int)
+        optimized_toevoegingen = np.array(optimized_toevoegingen, dtype=float)
         optimized_totale_massa = massa_product + sum(optimized_toevoegingen)
         for diag in diagnostics:
             print(diag)
@@ -377,6 +349,9 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
         return optimized_toevoegingen, optimized_totale_massa, "Succes"
     else:
         fail_msg = f"Optimalisatie mislukt: {LpStatus[prob.status]}. Targets:\n" + "\n".join(diagnostics)
+        if use_max_volume and max_volume is not None and max_volume > 0:
+            initial_volume = massa_product / dichtheid
+            fail_msg += f"\nControleer de maximale volumebeperking: huidige massa ({massa_product:.2f} kg) heeft een volume van {initial_volume:.2f} liter, terwijl het maximum {max_volume:.2f} liter is."
         return None, None, fail_msg
     
 # Initialisatie van session state
@@ -413,21 +388,52 @@ if st.button("Bereken Geoptimaliseerde Toevoegingen", help="Klik om de optimalis
             use_max_volume, 
             max_volume_liters, 
             stapgroottes, 
-            mass_penalty, 
-            deviation_weight,
+            st.session_state.mass_penalty, 
+            st.session_state.deviation_weight,
             excluded_indices=[]  # Geen exclusies voor originele optimalisatie
         )
         if status == "Succes":
-            df['Toevoegen Grondstof'] = optimized_toevoegingen
-            df['Geoptimaliseerde_Toegevoegd_Element'] = df.apply(bereken_toegevoegd_element, axis=1)
-            df['Na Optimalisatie'] = df.apply(bereken_gecorrigeerde_concentratie, axis=1, totale_massa_correctie=optimized_totale_massa)
-            df['Binnen Specs'] = (df['Na Optimalisatie'] >= df['Min']) & (df['Na Optimalisatie'] <= df['Max'])
-            st.session_state.optimized_resultaten = df[['Grondstof', 'Element', 'Gemeten Concentratie', 'Toevoegen Grondstof', 'Na Optimalisatie', 'Spec', 'Min', 'Max', 'Binnen Specs', 'Eenheid']].copy()
-            st.session_state.optimized_status = status
-            st.session_state.optimized_totale_massa = optimized_totale_massa
-            st.session_state.optimized_toevoegingen = optimized_toevoegingen
-        else:
-            st.session_state.optimized_status = status
+            # Check for small additions to refine
+            refine_indices = [i for i in range(len(optimized_toevoegingen)) if 0 < optimized_toevoegingen[i] <= 9]
+            if refine_indices:
+                fixed_values = {i: optimized_toevoegingen[i] for i in range(len(optimized_toevoegingen)) if i not in refine_indices}
+                optimized_toevoegingen, optimized_totale_massa, status = optimize_toevoegingen(
+                    massa_product, 
+                    df['Actuele_Hoeveelheid_Element'].values, 
+                    df['Ratio_Element'].values,
+                    df['Eenheid'].values, 
+                    df['Min'].values, 
+                    df['Max'].values, 
+                    df['Spec'].values,
+                    use_max_volume, 
+                    max_volume_liters, 
+                    stapgroottes, 
+                    st.session_state.mass_penalty, 
+                    st.session_state.deviation_weight,
+                    excluded_indices=[],
+                    fixed_values=fixed_values,
+                    refine=True
+                )
+            if status == "Succes":
+                df['Toevoegen Grondstof'] = optimized_toevoegingen
+                df['Geoptimaliseerde_Toegevoegd_Element'] = df.apply(bereken_toegevoegd_element, axis=1)
+                df['Na Optimalisatie'] = df.apply(bereken_gecorrigeerde_concentratie, axis=1, totale_massa_correctie=optimized_totale_massa)
+                df['Binnen Specs'] = (df['Na Optimalisatie'] >= df['Min']) & (df['Na Optimalisatie'] <= df['Max'])
+                st.session_state.optimized_resultaten = df[['Grondstof', 'Element', 'Gemeten Concentratie', 'Toevoegen Grondstof', 'Na Optimalisatie', 'Spec', 'Min', 'Max', 'Binnen Specs', 'Eenheid']].copy()
+                st.session_state.optimized_status = status
+                st.session_state.optimized_totale_massa = optimized_totale_massa
+                st.session_state.optimized_toevoegingen = optimized_toevoegingen
+        if status != "Succes":
+            st.error(f"Optimalisatie mislukt: {status}")
+            if "Infeasible" in status and use_max_volume:
+                st.warning(
+                    f"De maximale volumebeperking ({max_volume_liters:.2f} liter) is waarschijnlijk te streng. "
+                    "Probeer het maximale volume te verhogen of schakel de volumebeperking uit."
+                )
+            else:
+                st.warning(
+                    "De optimalisatie kon geen oplossing vinden. Controleer de invoerparameters (bijv. gemeten concentraties, specificaties, of stapgroottes) en probeer opnieuw."
+                )
 
 # Toon originele resultaten als ze beschikbaar zijn
 if st.session_state.optimized_status == "Succes" and st.session_state.optimized_resultaten is not None:
@@ -511,10 +517,32 @@ if st.session_state.optimized_toevoegingen is not None:
                 use_max_volume, 
                 max_volume_liters, 
                 stapgroottes, 
-                mass_penalty, 
-                deviation_weight,
+                st.session_state.mass_penalty, 
+                st.session_state.deviation_weight,
                 excluded_indices=st.session_state.excluded_indices
             )
+            if adj_status == "Succes":
+                # Check for small additions to refine
+                refine_indices = [i for i in range(len(adj_optimized_toevoegingen)) if 0 < adj_optimized_toevoegingen[i] <= 9]
+                if refine_indices:
+                    fixed_values = {i: adj_optimized_toevoegingen[i] for i in range(len(adj_optimized_toevoegingen)) if i not in refine_indices}
+                    adj_optimized_toevoegingen, adj_optimized_totale_massa, adj_status = optimize_toevoegingen(
+                        massa_product, 
+                        adj_df['Actuele_Hoeveelheid_Element'].values, 
+                        adj_df['Ratio_Element'].values,
+                        adj_df['Eenheid'].values, 
+                        adj_df['Min'].values, 
+                        adj_df['Max'].values, 
+                        adj_df['Spec'].values,
+                        use_max_volume, 
+                        max_volume_liters, 
+                        stapgroottes, 
+                        st.session_state.mass_penalty, 
+                        st.session_state.deviation_weight,
+                        excluded_indices=st.session_state.excluded_indices,
+                        fixed_values=fixed_values,
+                        refine=True
+                    )
             if adj_status == "Succes":
                 adj_df['Toevoegen Grondstof'] = adj_optimized_toevoegingen
                 adj_df['Geoptimaliseerde_Toegevoegd_Element'] = adj_df.apply(bereken_toegevoegd_element, axis=1)
@@ -550,5 +578,7 @@ if st.session_state.optimized_toevoegingen is not None:
                     mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                     help="Download de aangepaste geoptimaliseerde resultaten als Excel-bestand."
                 )
+            else:
+                st.error(f"Aangepaste optimalisatie mislukt: {adj_status}")
 else:
     st.info("Geen optimalisatieresultaten beschikbaar. Voer eerst de originele optimalisatie uit.")
