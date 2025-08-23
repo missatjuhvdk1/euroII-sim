@@ -2,7 +2,7 @@ import io
 import streamlit as st
 import pandas as pd
 import numpy as np
-from pulp import LpProblem, LpMinimize, LpVariable, lpSum, LpStatus, PULP_CBC_CMD
+from pulp import LpProblem, LpMinimize, LpVariable, lpSum, LpStatus, PULP_CBC_CMD, LpAffineExpression
 import plotly.express as px
 import json
 
@@ -249,21 +249,16 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
                     toevoegingen[i] = LpVariable(f"add_{i}", lowBound=0, cat='Integer')
 
     # Identify variables and fixed additions
-    var_toevoegingen = {i: t for i, t in toevoegingen.items() if isinstance(t, LpVariable)}
-    fixed_add_mass = sum([t for i, t in toevoegingen.items() if not isinstance(t, LpVariable)])
-    fixed_cost = sum([st.session_state.kosten[df['Grondstof'][i]] * toevoegingen[i] for i in toevoegingen if not isinstance(toevoegingen[i], LpVariable)])
+    var_toevoegingen = {i: t for i, t in toevoegingen.items() if isinstance(t, (LpVariable, LpAffineExpression))}
+    fixed_add_mass = sum([t for i, t in toevoegingen.items() if isinstance(t, (float, int))])
+    fixed_cost = sum([st.session_state.kosten[df['Grondstof'][i]] * toevoegingen[i] for i, t in toevoegingen.items() if isinstance(t, (float, int))])
 
-    # Total mass
+    # Total mass for constraints (includes variables)
     totale_massa = massa_product + fixed_add_mass + lpSum(var_toevoegingen.values())
 
-    # Objective
-    costs = [st.session_state.kosten[df['Grondstof'][i]] for i in range(len(ratios))]
-    objective = fixed_cost + lpSum(costs[i] * var_toevoegingen[i] for i in var_toevoegingen)
-    objective += mass_penalty * (fixed_add_mass + lpSum(var_toevoegingen.values()))
-    
-    # Effective initial for diagnostics
+    # Effective initial for diagnostics (use only fixed components)
     effective_massa = massa_product + fixed_add_mass
-    effective_actuele = [actuele_hoeveelheden[i] + (fixed_values.get(i, 0) if i in fixed_values else 0) * ratios[i] for i in range(len(ratios))]
+    effective_actuele = [actuele_hoeveelheden[i] + (fixed_values.get(i, 0) * ratios[i] if i in fixed_values else 0) for i in range(len(ratios))]
 
     # Diagnostics and targets
     diagnostics = []
@@ -291,10 +286,16 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
         target_str = f"{target_value:.2f}" if isinstance(target_value, (int, float)) else "None"
         diagnostics.append(f"{df['Element'][i]} target: {target_str} ({diag_msg}, current: {current_conc:.2f})")
 
+    # Objective
+    costs = [st.session_state.kosten[df['Grondstof'][i]] for i in range(len(ratios))]
+    objective = fixed_cost + lpSum(costs[i] * var_toevoegingen[i] for i in var_toevoegingen)
+    objective += mass_penalty * (fixed_add_mass + lpSum(var_toevoegingen.values()))
+
     # Constraints and deviations
     for i in target_set:
         conversie_factor = 100 if eenheden[i] == 'wt%' else 1000000
-        totale_element = effective_actuele[i] + toevoegingen[i] * ratios[i] - (fixed_values.get(i, 0) * ratios[i] if i in fixed_values else 0)
+        fixed_element = effective_actuele[i] - (fixed_values.get(i, 0) * ratios[i] if i in fixed_values else 0)
+        totale_element = fixed_element + toevoegingen[i] * ratios[i]
         target_element_mass = targets[i] * totale_massa / conversie_factor
         dev_plus = LpVariable(f"dev_plus_{i}", lowBound=0)
         dev_minus = LpVariable(f"dev_minus_{i}", lowBound=0)
@@ -306,7 +307,8 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
         if ratios[i] == 0 or i in excluded_indices:
             continue
         conversie_factor = 100 if eenheden[i] == 'wt%' else 1000000
-        totale_element = effective_actuele[i] + toevoegingen[i] * ratios[i] - (fixed_values.get(i, 0) * ratios[i] if i in fixed_values else 0)
+        fixed_element = effective_actuele[i] - (fixed_values.get(i, 0) * ratios[i] if i in fixed_values else 0)
+        totale_element = fixed_element + toevoegingen[i] * ratios[i]
         min_element_mass = min_specs[i] * totale_massa / conversie_factor
         max_element_mass = max_specs[i] * totale_massa / conversie_factor
         prob += totale_element >= min_element_mass, f"Min_{i}"
@@ -331,8 +333,8 @@ def optimize_toevoegingen(massa_product, actuele_hoeveelheden, ratios, eenheden,
         optimized_toevoegingen = []
         for i in range(len(ratios)):
             t = toevoegingen[i]
-            if isinstance(t, LpVariable):
-                value = t.varValue if t.varValue is not None else 0.0
+            if isinstance(t, (LpVariable, LpAffineExpression)):
+                value = t.value() if t.value() is not None else 0.0
                 if not refine and stapgroottes[i] > 0:
                     value = round(value)
             else:
