@@ -1,7 +1,15 @@
 {
-  "T-1721": {
-    "Name": "Tank 1721",
-    "Max_Volume_m3": 28.0
+  "T-17162": {
+    "Name": "Tank 17162",
+    "Max_Volume_m3": 3.0
+  },
+  "T-17165": {
+    "Name": "Tank 17165",
+    "Max_Volume_m3": 14.0
+  },
+  "T-17153": {
+    "Name": "Tank 17153",
+    "Max_Volume_m3": 20.0
   },
   "T-17154": {
     "Name": "Tank 17154",
@@ -11,20 +19,12 @@
     "Name": "Tank 1741",
     "Max_Volume_m3": 27.0
   },
-  "T-17153": {
-    "Name": "Tank 17153",
-    "Max_Volume_m3": 20.0
+  "T-1721": {
+    "Name": "Tank 1721",
+    "Max_Volume_m3": 28.0
   },
   "T-17155": {
     "Name": "Tank 17155",
     "Max_Volume_m3": 40.0
-  },
-  "T-17162": {
-    "Name": "Tank 17162",
-    "Max_Volume_m3": 3.0
-  },
-  "T-17165": {
-    "Name": "Tank 17165",
-    "Max_Volume_m3": 14.0
   }
 }
