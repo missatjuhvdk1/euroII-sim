@@ -1,50 +1,227 @@
 {
-    "Zero Waste Solution A": {
-        "Hoeveelheid": 1100.0,
-        "Dichtheid": 1.307,
-        "Max_Volume": 2000.0,
-        "Data": {
-            "Grondstof": ["Fosforzuur 75%", "Magnesiumchloride", "Yzerchloride", "Cobaltsulfaat oplossing", "Nikkelsulfaat oplossing", "Demiwater"],
-            "Element": ["P2O5", "MgO", "Fe", "Co", "Ni", "Geen"],
-            "Gemeten_Concentratie": [23.7, 2.7, 1.17, 105, 200, 0],
-            "Eenheid": ["wt%", "wt%", "wt%", "mg/kg", "mg/kg", "wt%"],
-            "Spec": [25, 3, 1.175, 110, 220, 0],
-            "Min": [24.2, 2.7, 1.1, 90, 190, 0],
-            "Max": [25.8, 3.3, 1.25, 130, 250, 0],
-            "Concentratie_Grondstof": [74.9, 19.7, 13.7, 8.2, 6.4, 0],
-            "Ratio_Element": [0.5424258, 0.197, 0.137, 0.082, 0.064, 0]
-        }
+    "meta": {
+        "schema_version": 1,
+        "template_version": "2024.07",
+        "last_uploaded_at": "2025-09-23T16:21:27.415449",
+        "bron": "excel-upload",
+        "archive_file": "recepten_upload_20250923-162127.xlsx",
+        "total_recipes": 4,
+        "total_componenten": 18,
+        "last_updated": "2025-09-23T16:21:27.415449"
     },
-    "DKP 0-20-25": {
-        "Hoeveelheid": 14100.0,
-        "Dichtheid": 1.503,
-        "Max_Volume": 140000.0,
-        "Data": {
-            "Grondstof": ["Fosforzuur 75%", "Kaliloog 50%", "Demiwater"],
-            "Element": ["P2O5", "K2O", "Geen"],
-            "Gemeten_Concentratie": [18.2, 25.4, 0],
-            "Eenheid": ["wt%", "wt%", "wt%"],
-            "Spec": [20.25, 25.25, 0],
-            "Min": [19.5, 24.5, 0],
-            "Max": [21, 26, 0],
-            "Concentratie_Grondstof": [75, 50.3, 0],
-            "Ratio_Element": [0.54315, 0.4222685, 0]
-        }
-    },
-    "PB Bravo": {
-        "Hoeveelheid": 24000.0,
-        "Dichtheid": 1.295,
-        "Max_Volume": 31000.0,
-        "Data": {
-            "Grondstof": ["Ureum prills", "Zwavelzuur 96%", "Demiwater"],
-            "Element": ["N-Ureum", "SO3", "Geen"],
-            "Gemeten_Concentratie": [19.4, 13.9, 0],
-            "Eenheid": ["wt%", "wt%", "wt%"],
-            "Spec": [22, 10, 0],
-            "Min": [21.4, 9.1, 0],
-            "Max": [22.6, 10.9, 0],
-            "Concentratie_Grondstof": [46, 78.36, 0],
-            "Ratio_Element": [0.46, 0.7836, 0]
+    "recipes": {
+        "DKP 0-20-25": {
+            "Hoeveelheid": 14100.0,
+            "Dichtheid": 1.503,
+            "Max_Volume": 140000.0,
+            "Data": {
+                "Grondstof": [
+                    "Fosforzuur 75%",
+                    "Kaliloog 50%",
+                    "Demiwater"
+                ],
+                "Element": [
+                    "P2O5",
+                    "K2O",
+                    "Geen"
+                ],
+                "Eenheid": [
+                    "wt%",
+                    "wt%",
+                    "wt%"
+                ],
+                "Gemeten_Concentratie": [
+                    18.2,
+                    25.4,
+                    0.0
+                ],
+                "Spec": [
+                    20.25,
+                    25.25,
+                    0.0
+                ],
+                "Min": [
+                    19.5,
+                    24.5,
+                    0.0
+                ],
+                "Max": [
+                    21.0,
+                    26.0,
+                    0.0
+                ],
+                "Concentratie_Grondstof": [
+                    75.0,
+                    50.3,
+                    0.0
+                ],
+                "Ratio_Element": [
+                    0.54315,
+                    0.4222685,
+                    0.0
+                ],
+                "Notities": [
+                    "",
+                    "",
+                    ""
+                ]
+            },
+            "Recept_ID": "DKP 0-20-25",
+            "Status": "Actief",
+            "Ingangsdatum": null,
+            "Opmerkingen": "nan"
+        },
+        "PB Bravo": {
+            "Hoeveelheid": 24000.0,
+            "Dichtheid": 1.295,
+            "Max_Volume": 31000.0,
+            "Data": {
+                "Grondstof": [
+                    "Ureum prills",
+                    "Zwavelzuur 96%",
+                    "Demiwater"
+                ],
+                "Element": [
+                    "N-Ureum",
+                    "SO3",
+                    "Geen"
+                ],
+                "Eenheid": [
+                    "wt%",
+                    "wt%",
+                    "wt%"
+                ],
+                "Gemeten_Concentratie": [
+                    19.4,
+                    13.9,
+                    0.0
+                ],
+                "Spec": [
+                    22.0,
+                    10.0,
+                    0.0
+                ],
+                "Min": [
+                    21.4,
+                    9.1,
+                    0.0
+                ],
+                "Max": [
+                    22.6,
+                    10.9,
+                    0.0
+                ],
+                "Concentratie_Grondstof": [
+                    46.0,
+                    78.36,
+                    0.0
+                ],
+                "Ratio_Element": [
+                    0.46,
+                    0.7836,
+                    0.0
+                ],
+                "Notities": [
+                    "",
+                    "",
+                    ""
+                ]
+            },
+            "Recept_ID": "PB Bravo",
+            "Status": "Actief",
+            "Ingangsdatum": null,
+            "Opmerkingen": "nan"
+        },
+        "Zero Waste Solution A": {
+            "Hoeveelheid": 1100.0,
+            "Dichtheid": 1.307,
+            "Max_Volume": 2000.0,
+            "Data": {
+                "Grondstof": [
+                    "Fosforzuur 75%",
+                    "Magnesiumchloride",
+                    "Yzerchloride",
+                    "Cobaltsulfaat oplossing",
+                    "Nikkelsulfaat oplossing",
+                    "Demiwater"
+                ],
+                "Element": [
+                    "P2O5",
+                    "MgO",
+                    "Fe",
+                    "Co",
+                    "Ni",
+                    "Geen"
+                ],
+                "Eenheid": [
+                    "wt%",
+                    "wt%",
+                    "wt%",
+                    "mg/kg",
+                    "mg/kg",
+                    "wt%"
+                ],
+                "Gemeten_Concentratie": [
+                    23.7,
+                    2.7,
+                    1.17,
+                    105.0,
+                    200.0,
+                    0.0
+                ],
+                "Spec": [
+                    25.0,
+                    3.0,
+                    1.175,
+                    110.0,
+                    220.0,
+                    0.0
+                ],
+                "Min": [
+                    24.2,
+                    2.7,
+                    1.1,
+                    90.0,
+                    190.0,
+                    0.0
+                ],
+                "Max": [
+                    25.8,
+                    3.3,
+                    1.25,
+                    130.0,
+                    250.0,
+                    0.0
+                ],
+                "Concentratie_Grondstof": [
+                    74.9,
+                    19.7,
+                    13.7,
+                    8.2,
+                    6.4,
+                    0.0
+                ],
+                "Ratio_Element": [
+                    0.5424258,
+                    0.197,
+                    0.137,
+                    0.082,
+                    0.064,
+                    0.0
+                ],
+                "Notities": [
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    ""
+                ]
+            },
+            "Recept_ID": "Zero Waste Solution A",
+            "Status": "Actief",
+            "Ingangsdatum": null,
+            "Opmerkingen": "nan"
         }
     }
 }

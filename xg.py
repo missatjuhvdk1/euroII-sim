@@ -1,32 +1,657 @@
 import io
-import streamlit as st
-import pandas as pd
-import numpy as np
-from pulp import LpProblem, LpMinimize, LpVariable, lpSum, LpStatus, PULP_CBC_CMD, LpAffineExpression
-import plotly.express as px
 import json
+from datetime import datetime
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import streamlit as st
+from pulp import (
+    LpAffineExpression,
+    LpMinimize,
+    LpProblem,
+    LpStatus,
+    LpVariable,
+    PULP_CBC_CMD,
+    lpSum,
+)
 
 # Set page configuration for wide mode at the start
 st.set_page_config(layout="wide")
 
-# Load recepten from JSON with fallback to hardcoded for robustness
-try:
-    with open('recepten.json', 'r') as f:
-        recepten = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError):
-    st.error("Error loading recepten.json. Falling back to hardcoded data.")
-    st.stop
+BASE_DIR = Path.cwd()
+RECEPTEN_PATH = BASE_DIR / "recepten.json"
+TANKS_PATH = BASE_DIR / "tanks.json"
+UPLOAD_ARCHIVE = BASE_DIR / "dist" / "recepten_uploads"
+
+RECIPE_SHEET_NAME = "Recepten"
+COMPOSITION_SHEET_NAME = "Samenstelling"
+TEMPLATE_VERSION = "2024.07"
+
+RECIPE_TEMPLATE_COLUMNS = [
+    "Recept ID",
+    "Naam",
+    "Status",
+    "Hoeveelheid",
+    "Dichtheid",
+    "Max Volume liter",
+    "Ingangsdatum",
+    "Opmerkingen",
+]
+
+COMPOSITION_TEMPLATE_COLUMNS = [
+    "Recept ID",
+    "Grondstof",
+    "Element",
+    "Eenheid",
+    "Gemeten Concentratie",
+    "Spec",
+    "Min",
+    "Max",
+    "Concentratie Grondstof",
+    "Ratio Element",
+    "Notities",
+]
+
+RECIPE_REQUIRED_COLUMNS = {"Recept ID", "Naam", "Hoeveelheid", "Dichtheid"}
+COMPOSITION_REQUIRED_COLUMNS = {
+    "Recept ID",
+    "Grondstof",
+    "Element",
+    "Eenheid",
+    "Gemeten Concentratie",
+    "Spec",
+    "Min",
+    "Max",
+    "Concentratie Grondstof",
+    "Ratio Element",
+}
+
+NUMERIC_RECIPE_COLUMNS = ["Hoeveelheid", "Dichtheid", "Max Volume liter"]
+
+COMPOSITION_NUMERIC_FIELDS = [
+    ("Gemeten Concentratie", "Gemeten_Concentratie", True),
+    ("Spec", "Spec", False),
+    ("Min", "Min", False),
+    ("Max", "Max", False),
+    ("Concentratie Grondstof", "Concentratie_Grondstof", False),
+    ("Ratio Element", "Ratio_Element", False),
+]
+
+DEFAULT_RECIPE_META = {"schema_version": 1, "template_version": TEMPLATE_VERSION}
+
+
+def ensure_archive_directory() -> None:
+    """Zorg dat de map voor geüploade recepten aanwezig is."""
+
+    UPLOAD_ARCHIVE.mkdir(parents=True, exist_ok=True)
+
+
+def format_timestamp(value, default: str = "-") -> str:
+    """Zet ISO-timestamp om naar 'YYYY-MM-DD HH:MM'."""
+
+    if not value:
+        return default
+    try:
+        parsed = pd.to_datetime(value, utc=True)
+    except Exception:  # noqa: BLE001 - parsing mag niet crashen
+        try:
+            parsed = pd.to_datetime(value, errors="coerce")
+        except Exception:
+            return str(value)
+
+    if pd.isna(parsed):
+        return default
+
+    if getattr(parsed, "tzinfo", None) is not None:
+        parsed = parsed.tz_convert(None)
+
+    return parsed.strftime("%Y-%m-%d %H:%M")
+
+
+def load_recepten_data():
+    """Lees recepten.json en bied ondersteuning voor legacy-structuren."""
+
+    if not RECEPTEN_PATH.exists():
+        return {}, {**DEFAULT_RECIPE_META, "last_updated": None}
+
+    try:
+        payload = json.loads(RECEPTEN_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        st.error(f"Fout bij het inladen van recepten.json: {exc}")
+        st.stop()
+
+    if isinstance(payload, dict) and "recipes" in payload:
+        recipes = payload.get("recipes", {})
+        meta = {**DEFAULT_RECIPE_META, **payload.get("meta", {})}
+    elif isinstance(payload, dict):
+        recipes = payload
+        meta = {**DEFAULT_RECIPE_META, "bron": "legacy"}
+    else:
+        st.error("Onbekend formaat van recepten.json. Controleer het bestand.")
+        st.stop()
+
+    return recipes, meta
+
+
+def write_recepten_data(recipes: dict, meta: dict) -> None:
+    """Bewaar recepten in een gestandaardiseerde structuur."""
+
+    payload = {
+        "meta": {**DEFAULT_RECIPE_META, **meta, "last_updated": datetime.utcnow().isoformat()},
+        "recipes": recipes,
+    }
+    RECEPTEN_PATH.write_text(json.dumps(payload, indent=4, ensure_ascii=False), encoding="utf-8")
+
+
+def coerce_float(value, context: str, errors: list[str], allow_empty: bool = False) -> float | None:
+    """Zet waarden om naar float met foutafhandeling."""
+
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        if allow_empty:
+            return 0.0
+        errors.append(f"Waarde ontbreekt: {context}")
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        if allow_empty:
+            return 0.0
+        errors.append(f"Ongeldige numerieke waarde ({value}) voor {context}")
+        return None
+
+
+def coerce_date(value) -> str | None:
+    """Converteer datumwaarden naar ISO-notatie."""
+
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return None
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    try:
+        parsed = pd.to_datetime(value, errors="coerce")
+        return parsed.date().isoformat() if pd.notna(parsed) else str(value)
+    except Exception:  # noqa: BLE001 - brede catching om inconsistenties op te vangen
+        return str(value)
+
+
+def generate_recipe_template_bytes() -> bytes:
+    """Genereer een ingevroren Excel-sjabloon voor receptenbeheer."""
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    wb = Workbook()
+
+    ws_recipes = wb.active
+    ws_recipes.title = RECIPE_SHEET_NAME
+    ws_recipes.append(RECIPE_TEMPLATE_COLUMNS)
+    ws_recipes.freeze_panes = "A2"
+
+    header_fill = PatternFill(start_color="FF004B8D", end_color="FF004B8D", fill_type="solid")
+    header_font = Font(color="FFFFFFFF", bold=True)
+    for col_idx in range(1, len(RECIPE_TEMPLATE_COLUMNS) + 1):
+        cell = ws_recipes.cell(row=1, column=col_idx)
+        cell.fill = header_fill
+        cell.font = header_font
+        ws_recipes.column_dimensions[cell.column_letter].width = 22
+
+    status_validation = DataValidation(
+        type="list",
+        formula1='"Actief,Gepland,Gearchiveerd"',
+        allow_blank=True,
+        showErrorMessage=True,
+        error="Kies een status uit de lijst.",
+    )
+    ws_recipes.add_data_validation(status_validation)
+    status_validation.add("C2:C500")
+
+    ws_comp = wb.create_sheet(COMPOSITION_SHEET_NAME)
+    ws_comp.append(COMPOSITION_TEMPLATE_COLUMNS)
+    ws_comp.freeze_panes = "A2"
+
+    for col_idx in range(1, len(COMPOSITION_TEMPLATE_COLUMNS) + 1):
+        cell = ws_comp.cell(row=1, column=col_idx)
+        cell.fill = header_fill
+        cell.font = header_font
+        ws_comp.column_dimensions[cell.column_letter].width = 24
+
+    eenheid_validation = DataValidation(
+        type="list",
+        formula1='"wt%,mg/kg"',
+        allow_blank=False,
+        showErrorMessage=True,
+        error="Gebruik wt% of mg/kg.",
+    )
+    ws_comp.add_data_validation(eenheid_validation)
+    eenheid_validation.add("D2:D1000")
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output.getvalue()
+
+
+def generate_recipe_export_bytes(recipes: dict[str, dict]) -> bytes:
+    """Vul het sjabloon met de huidige dataset zodat gebruikers eenvoudig kunnen uitbreiden."""
+
+    from openpyxl import load_workbook
+
+    base_workbook = io.BytesIO(generate_recipe_template_bytes())
+    wb = load_workbook(base_workbook)
+
+    ws_recipes = wb[RECIPE_SHEET_NAME]
+    ws_comp = wb[COMPOSITION_SHEET_NAME]
+
+    recipe_row = 2
+    composition_row = 2
+
+    for naam, payload in sorted(recipes.items()):
+        data = payload.get("Data", {})
+        max_volume = payload.get("Max_Volume_liter", payload.get("Max_Volume"))
+        recept_id = payload.get("Recept_ID") or naam
+
+        recipe_values = {
+            "Recept ID": recept_id,
+            "Naam": naam,
+            "Status": payload.get("Status", "Actief"),
+            "Hoeveelheid": payload.get("Hoeveelheid"),
+            "Dichtheid": payload.get("Dichtheid"),
+            "Max Volume liter": max_volume,
+            "Ingangsdatum": payload.get("Ingangsdatum"),
+            "Opmerkingen": payload.get("Opmerkingen", ""),
+        }
+
+        for col_idx, kolom in enumerate(RECIPE_TEMPLATE_COLUMNS, start=1):
+            ws_recipes.cell(row=recipe_row, column=col_idx, value=recipe_values.get(kolom))
+        recipe_row += 1
+
+        if not data:
+            continue
+
+        row_count = len(data.get("Grondstof", []))
+        for i in range(row_count):
+            comp_values = {
+                "Recept ID": recept_id,
+                "Grondstof": data.get("Grondstof", [None] * row_count)[i],
+                "Element": data.get("Element", [None] * row_count)[i],
+                "Eenheid": data.get("Eenheid", [None] * row_count)[i],
+                "Gemeten Concentratie": data.get("Gemeten_Concentratie", [None] * row_count)[i],
+                "Spec": data.get("Spec", [None] * row_count)[i],
+                "Min": data.get("Min", [None] * row_count)[i],
+                "Max": data.get("Max", [None] * row_count)[i],
+                "Concentratie Grondstof": data.get("Concentratie_Grondstof", [None] * row_count)[i],
+                "Ratio Element": data.get("Ratio_Element", [None] * row_count)[i],
+                "Notities": data.get("Notities", [""] * row_count)[i] if data.get("Notities") else "",
+            }
+
+            for col_idx, kolom in enumerate(COMPOSITION_TEMPLATE_COLUMNS, start=1):
+                ws_comp.cell(row=composition_row, column=col_idx, value=comp_values.get(kolom))
+            composition_row += 1
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output.getvalue()
+
+
+def parse_uploaded_recipes(file_bytes: bytes) -> tuple[dict, dict, dict, list[str]]:
+    """Parset een geüpload werkboek naar het interne JSON-formaat."""
+
+    errors: list[str] = []
+    excel_handle = io.BytesIO(file_bytes)
+
+    try:
+        xls = pd.ExcelFile(excel_handle)
+    except ValueError as exc:
+        errors.append(f"Bestand kan niet worden geopend als Excel: {exc}")
+        return {}, {}, {}, errors
+
+    missing_sheets = [sheet for sheet in (RECIPE_SHEET_NAME, COMPOSITION_SHEET_NAME) if sheet not in xls.sheet_names]
+    if missing_sheets:
+        errors.append(f"Ontbrekende tabbladen: {', '.join(missing_sheets)}")
+        return {}, {}, {}, errors
+
+    recepten_df = pd.read_excel(xls, RECIPE_SHEET_NAME).dropna(how="all")
+    samenstelling_df = pd.read_excel(xls, COMPOSITION_SHEET_NAME).dropna(how="all")
+
+    missing_recipe_columns = RECIPE_REQUIRED_COLUMNS - set(recepten_df.columns)
+    missing_comp_columns = COMPOSITION_REQUIRED_COLUMNS - set(samenstelling_df.columns)
+
+    if missing_recipe_columns:
+        errors.append(
+            "Ontbrekende verplichte kolommen in Recepten-tabblad: " + ", ".join(sorted(missing_recipe_columns))
+        )
+    if missing_comp_columns:
+        errors.append(
+            "Ontbrekende verplichte kolommen in Samenstelling-tabblad: " + ", ".join(sorted(missing_comp_columns))
+        )
+
+    if errors:
+        return {}, {}, {}, errors
+
+    recipes_payload: dict[str, dict] = {}
+    composition_preview: dict[str, pd.DataFrame] = {}
+    gebruikte_ids: set[str] = set()
+
+    for idx, row in recepten_df.iterrows():
+        row_number = idx + 2  # rekening houden met header
+        recept_id = str(row.get("Recept ID", "")).strip()
+        naam = str(row.get("Naam", "")).strip()
+
+        if not recept_id:
+            errors.append(f"Recept ID ontbreekt in Recepten rij {row_number}.")
+            continue
+        if recept_id in gebruikte_ids:
+            errors.append(f"Dubbele Recept ID '{recept_id}' in Recepten tabblad.")
+            continue
+        gebruikte_ids.add(recept_id)
+
+        if not naam:
+            errors.append(f"Naam ontbreekt in Recepten rij {row_number}.")
+            continue
+        if naam in recipes_payload:
+            errors.append(f"Dubbele naam '{naam}' in Recepten tabblad.")
+            continue
+
+        hoeveelheid = coerce_float(row.get("Hoeveelheid"), f"Hoeveelheid (rij {row_number})", errors)
+        dichtheid = coerce_float(row.get("Dichtheid"), f"Dichtheid (rij {row_number})", errors)
+
+        if hoeveelheid is None or dichtheid is None:
+            continue
+
+        max_volume_val = row.get("Max Volume liter")
+        max_volume = None
+        if pd.notna(max_volume_val):
+            max_volume = coerce_float(max_volume_val, f"Max Volume liter (rij {row_number})", errors)
+
+        recipe_meta = {
+            "Recept_ID": recept_id,
+            "Status": str(row.get("Status", "Actief")).strip() or "Actief",
+            "Ingangsdatum": coerce_date(row.get("Ingangsdatum")),
+            "Opmerkingen": str(row.get("Opmerkingen", "")).strip(),
+        }
+
+        matching_comp = samenstelling_df[
+            samenstelling_df["Recept ID"].astype(str).str.strip() == recept_id
+        ]
+        if matching_comp.empty:
+            errors.append(f"Geen regels in tabblad Samenstelling voor recept '{naam}'.")
+            continue
+
+        comp_dict = {
+            "Grondstof": [],
+            "Element": [],
+            "Eenheid": [],
+            "Gemeten_Concentratie": [],
+            "Spec": [],
+            "Min": [],
+            "Max": [],
+            "Concentratie_Grondstof": [],
+            "Ratio_Element": [],
+            "Notities": [],
+        }
+
+        for comp_idx, comp_row in matching_comp.iterrows():
+            comp_row_num = comp_idx + 2
+            grondstof = str(comp_row.get("Grondstof", "")).strip()
+            element = str(comp_row.get("Element", "")).strip() or "Geen"
+            eenheid = str(comp_row.get("Eenheid", "")).strip()
+
+            if not grondstof:
+                errors.append(
+                    f"Grondstof ontbreekt in Samenstelling rij {comp_row_num} voor recept '{naam}'."
+                )
+                continue
+            if not eenheid:
+                errors.append(
+                    f"Eenheid ontbreekt in Samenstelling rij {comp_row_num} voor recept '{naam}'."
+                )
+                continue
+
+            numeric_values: dict[str, float] = {}
+            missing_required = False
+            for kolomnaam, intern, optional in COMPOSITION_NUMERIC_FIELDS:
+                raw_value = coerce_float(
+                    comp_row.get(kolomnaam),
+                    f"{kolomnaam} (recept '{naam}', rij {comp_row_num})",
+                    errors,
+                    allow_empty=optional,
+                )
+                if raw_value is None:
+                    if optional:
+                        raw_value = 0.0
+                    else:
+                        missing_required = True
+                        break
+                numeric_values[intern] = raw_value
+
+            if missing_required:
+                continue
+
+            comp_dict["Grondstof"].append(grondstof)
+            comp_dict["Element"].append(element)
+            comp_dict["Eenheid"].append(eenheid)
+            for intern_key, value in numeric_values.items():
+                comp_dict[intern_key].append(value)
+
+            notities_val = comp_row.get("Notities", "")
+            if pd.isna(notities_val):
+                notities_val = ""
+            comp_dict["Notities"].append(str(notities_val).strip())
+
+        # Zorg dat alle lijsten dezelfde lengte hebben
+        lengths = {key: len(values) for key, values in comp_dict.items()}
+        if not lengths or not any(lengths.values()):
+            errors.append(f"Geen geldige samenstellingsregels gevonden voor recept '{naam}'.")
+            continue
+        if len(set(lengths.values())) != 1:
+            errors.append(
+                f"Inconsistente kolomlengtes voor recept '{naam}': {lengths}. Controleer op lege cellen."
+            )
+            continue
+
+        recipes_payload[naam] = {
+            "Hoeveelheid": hoeveelheid,
+            "Dichtheid": dichtheid,
+            "Max_Volume": max_volume,
+            "Data": comp_dict,
+            **recipe_meta,
+        }
+        composition_preview[naam] = matching_comp.reset_index(drop=True)
+
+    return recipes_payload, {"recepten": recepten_df, "samenstelling": samenstelling_df}, composition_preview, errors
+
+
+def render_recipe_management(recipes: dict[str, dict], meta: dict) -> None:
+    """UI voor het beheren van recepten via Excel-sjablonen."""
+
+    st.title("Receptbeheer")
+    st.markdown(
+        """
+        Download het sjabloon, vul of wijzig de gegevens, en upload het bestand om de recepten voor
+        de rekenmodule centraal te actualiseren. Alle teamleden zien direct dezelfde dataset.
+        """
+    )
+
+    st.subheader("Dataset exporteren")
+    if recipes:
+        export_bytes = generate_recipe_export_bytes(recipes)
+        st.download_button(
+            label="Download huidige dataset (Excel)",
+            data=export_bytes,
+            file_name="correctierecepten_actueel.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            help="Gebruik dit bestand als uitgangspunt om recepten te wijzigen of uit te breiden.",
+        )
+    else:
+        st.info("Nog geen recepten beschikbaar om te exporteren.")
+
+    st.markdown(
+        """
+        **Nieuwe recepten toevoegen**
+
+        1. Voeg op het tabblad *Recepten* een nieuwe rij toe met een uniek `Recept ID`, de `Naam` en de basisgegevens.
+        2. Vul op het tabblad *Samenstelling* meerdere rijen in met dezelfde `Recept ID` en specificeer per grondstof de specs.
+        3. Sla het bestand op en upload het via onderstaande sectie.
+        """
+    )
+
+    st.subheader("Huidige recepten")
+    if recipes:
+        overzicht_data = []
+        laatst_bijgewerkt = format_timestamp(
+            meta.get("last_uploaded_at") or meta.get("last_updated")
+        )
+        for naam, payload in recipes.items():
+            recept_id = payload.get("Recept_ID") or naam
+            overzicht_data.append(
+                {
+                    "Recept ID": recept_id,
+                    "Naam": naam,
+                    "Status": payload.get("Status", "Actief"),
+                    "Hoeveelheid (L)": payload.get("Hoeveelheid", 0),
+                    "Dichtheid (kg/L)": payload.get("Dichtheid", 0),
+                    "Max Volume (L)": payload.get("Max_Volume") or payload.get("Max_Volume_liter"),
+                    "Laatste Wijziging": laatst_bijgewerkt,
+                }
+            )
+        overzicht_df = pd.DataFrame(overzicht_data)
+        st.dataframe(overzicht_df.sort_values("Naam"), use_container_width=True)
+    else:
+        st.info("Er zijn nog geen recepten beschikbaar in het systeem.")
+
+    st.divider()
+    st.subheader("Upload bijgewerkte recepten")
+    st.markdown(
+        """
+        Upload een volledig ingevuld werkboek. Alle recepten in het bestand vervangen de huidige set. Er zullen
+        meerdere validatiecontroles plaatsvinden en een bevestiging is vereist voordat het bestand wordt opgeslagen.
+        """
+    )
+
+    uploaded_file = st.file_uploader(
+        "Kies een Excel-bestand (.xlsx)",
+        type=["xlsx"],
+        help="Alleen sjablonen met de tabbladen Recepten en Samenstelling worden geaccepteerd.",
+        key="recepten_upload",
+    )
+
+    if uploaded_file is not None:
+        file_bytes = uploaded_file.getvalue()
+        parsed_recipes, preview_frames, composition_frames, parse_errors = parse_uploaded_recipes(file_bytes)
+
+        if parse_errors:
+            for err in parse_errors:
+                st.error(err)
+        else:
+            st.success("Upload succesvol gevalideerd. Controleer de gegevens hieronder voordat je opslaat.")
+
+        if preview_frames:
+            st.markdown("**Recepten-tabblad**")
+            st.dataframe(preview_frames["recepten"], use_container_width=True)
+
+            st.markdown("**Samenstelling per recept**")
+            for naam, comp_df in composition_frames.items():
+                with st.expander(f"{naam} ({len(comp_df)} regels)", expanded=False):
+                    st.dataframe(comp_df, use_container_width=True)
+
+        if parsed_recipes:
+            huidige_namen = set(recipes.keys())
+            nieuwe_namen = set(parsed_recipes.keys())
+            toegevoegde = sorted(nieuwe_namen - huidige_namen)
+            verwijderd = sorted(huidige_namen - nieuwe_namen)
+            potentieel_bijgewerkt = sorted(nieuwe_namen & huidige_namen)
+            bijgewerkt = [naam for naam in potentieel_bijgewerkt if parsed_recipes[naam] != recipes.get(naam)]
+
+            st.markdown("**Wijzigingsoverzicht**")
+            if toegevoegde:
+                st.success("Toegevoegd: " + ", ".join(toegevoegde))
+            if bijgewerkt:
+                st.info("Bijgewerkt: " + ", ".join(bijgewerkt))
+            if verwijderd:
+                st.warning("Niet meer aanwezig in upload (worden verwijderd): " + ", ".join(verwijderd))
+            if not (toegevoegde or bijgewerkt or verwijderd):
+                st.write("Geen verschillen ten opzichte van de huidige dataset gevonden.")
+
+            bevestiging = st.checkbox(
+                "Ik bevestig dat de huidige recepten mogen worden vervangen door deze upload.",
+                key="confirm_recipe_replace",
+            )
+
+            if bevestiging and st.button("Opslaan en delen", key="commit_recipe_upload"):
+                timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+                archive_name = f"recepten_upload_{timestamp}.xlsx"
+                archive_path = UPLOAD_ARCHIVE / archive_name
+                archive_path.write_bytes(file_bytes)
+
+                total_elements = sum(len(payload["Data"].get("Grondstof", [])) for payload in parsed_recipes.values())
+                meta_update = {
+                    "template_version": TEMPLATE_VERSION,
+                    "last_uploaded_at": datetime.utcnow().isoformat(),
+                    "bron": "excel-upload",
+                    "archive_file": archive_name,
+                    "total_recipes": len(parsed_recipes),
+                    "total_componenten": total_elements,
+                }
+                write_recepten_data(parsed_recipes, meta_update)
+                st.success("Recepten opgeslagen en gesynchroniseerd. Alle gebruikers zien de nieuwe set.")
+                rerun_fn = getattr(st, "experimental_rerun", None)
+                if rerun_fn is None:
+                    rerun_fn = getattr(st, "rerun", None)
+                if callable(rerun_fn):
+                    rerun_fn()
+                else:
+                    st.info("Herlaad de pagina handmatig om de vernieuwingen te zien.")
+                    st.stop()
+
+    st.divider()
+    st.subheader("Uploadhistoriek")
+    archive_files = sorted(UPLOAD_ARCHIVE.glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if archive_files:
+        historie_data = []
+        for path in archive_files[:10]:
+            historie_data.append(
+                {
+                    "Bestand": path.name,
+                    "Datum": datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M"),
+                    "Grootte (KB)": round(path.stat().st_size / 1024, 1),
+                }
+            )
+        st.table(pd.DataFrame(historie_data))
+    else:
+        st.info("Er zijn nog geen geüploade versies gearchiveerd.")
+
+
+ensure_archive_directory()
+recepten, recepten_meta = load_recepten_data()
 
 # Load tanks from JSON (no fallback)
 try:
-    with open('tanks.json', 'r') as f:
-        tanks = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError) as e:
-    st.error(f"Error loading tanks.json: {str(e)}. Please ensure the file exists and is valid JSON.")
+    tanks = json.loads(TANKS_PATH.read_text(encoding="utf-8"))
+except FileNotFoundError:
+    st.error("tanks.json ontbreekt. Plaats het bestand in dezelfde map als de app.")
+    st.stop()
+except json.JSONDecodeError as exc:
+    st.error(f"tanks.json bevat ongeldige JSON: {exc}")
+    st.stop()
+
+modus = st.sidebar.radio("Kies scherm", ("Rekenmodule", "Receptbeheer"), index=0)
+
+if modus == "Receptbeheer":
+    render_recipe_management(recepten, recepten_meta)
     st.stop()
 
 # Titel van de app
 st.title("Correctie Recept Rekenmodule")
+
+if not recepten:
+    st.warning("Er zijn momenteel geen recepten beschikbaar. Voeg recepten toe via Receptbeheer.")
+    st.stop()
+if not tanks:
+    st.error("Er zijn geen tanks beschikbaar. Controleer tanks.json.")
+    st.stop()
 
 # Recept- en tankselectie
 col_recept, col_tank = st.columns(2)
