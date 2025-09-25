@@ -2,18 +2,149 @@
     "meta": {
         "schema_version": 1,
         "template_version": "2024.07",
-        "last_uploaded_at": "2025-09-23T16:21:27.415449",
+        "last_uploaded_at": "2025-09-25T16:56:25.592979",
         "bron": "excel-upload",
-        "archive_file": "recepten_upload_20250923-162127.xlsx",
-        "total_recipes": 4,
-        "total_componenten": 18,
-        "last_updated": "2025-09-23T16:21:27.415449"
+        "archive_file": "recepten_upload_20250925-165625.xlsx",
+        "total_recipes": 6,
+        "total_componenten": 37,
+        "last_updated": "2025-09-25T16:56:25.592979"
     },
     "recipes": {
+        "ANDY Powermix 1050": {
+            "Hoeveelheid": 10000.0,
+            "Dichtheid": 1.13,
+            "Max_Volume": 14000.0,
+            "Data": {
+                "Grondstof": [
+                    "Boorzuur",
+                    "Hortispoor Koper",
+                    "Hortispoor Mangaan",
+                    "Hortispoor Zink",
+                    "Nikkelsulfaat oplossing",
+                    "Cobaltsulfaat oplossing",
+                    "Natriumselenaat opl.",
+                    "Hortispoor Molybdeen",
+                    "Kaliumwolframaat opl.",
+                    "Demiwater"
+                ],
+                "Element": [
+                    "B",
+                    "Cu",
+                    "Mn",
+                    "Zn",
+                    "Ni",
+                    "Co",
+                    "Se",
+                    "Mo",
+                    "W",
+                    "nan"
+                ],
+                "Eenheid": [
+                    "mg/kg",
+                    "mg/kg",
+                    "wt%",
+                    "wt%",
+                    "mg/kg",
+                    "mg/kg",
+                    "mg/kg",
+                    "mg/kg",
+                    "mg/kg",
+                    "wt%"
+                ],
+                "Gemeten_Concentratie": [
+                    1770.0,
+                    2210.0,
+                    1.21,
+                    1.1,
+                    7740.0,
+                    5530.0,
+                    2210.0,
+                    4425.0,
+                    155.0,
+                    0.0
+                ],
+                "Spec": [
+                    1770.0,
+                    2210.0,
+                    1.21,
+                    1.1,
+                    7740.0,
+                    5530.0,
+                    2210.0,
+                    4425.0,
+                    155.0,
+                    0.0
+                ],
+                "Min": [
+                    1600.0,
+                    2000.0,
+                    1.1,
+                    1.0,
+                    7200.0,
+                    5200.0,
+                    2000.0,
+                    4200.0,
+                    140.0,
+                    0.0
+                ],
+                "Max": [
+                    1900.0,
+                    2400.0,
+                    1.3,
+                    1.2,
+                    8200.0,
+                    5800.0,
+                    2400.0,
+                    4625.0,
+                    170.0,
+                    0.0
+                ],
+                "Concentratie_Grondstof": [
+                    17.2,
+                    4.5,
+                    11.7,
+                    11.7,
+                    6.0,
+                    8.0,
+                    6.4,
+                    4.1,
+                    17.1,
+                    0.0
+                ],
+                "Ratio_Element": [
+                    0.172,
+                    0.045,
+                    0.117,
+                    0.117,
+                    0.06,
+                    0.08,
+                    0.064,
+                    0.041,
+                    0.171,
+                    0.0
+                ],
+                "Notities": [
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    ""
+                ]
+            },
+            "Recept_ID": "ANDY Powermix 1050",
+            "Status": "Actief",
+            "Ingangsdatum": null,
+            "Opmerkingen": "nan"
+        },
         "DKP 0-20-25": {
             "Hoeveelheid": 14100.0,
             "Dichtheid": 1.503,
-            "Max_Volume": 140000.0,
+            "Max_Volume": 14000.0,
             "Data": {
                 "Grondstof": [
                     "Fosforzuur 75%",
@@ -67,6 +198,137 @@
                 ]
             },
             "Recept_ID": "DKP 0-20-25",
+            "Status": "Actief",
+            "Ingangsdatum": null,
+            "Opmerkingen": "nan"
+        },
+        "NPK Protect 3+": {
+            "Hoeveelheid": 14100.0,
+            "Dichtheid": 1.38,
+            "Max_Volume": 14000.0,
+            "Data": {
+                "Grondstof": [
+                    "Kaliumfosfiet",
+                    "Kaliumfosfiet",
+                    "Ureum prills",
+                    "Hortispoor Molybdeen",
+                    "Hortispoor Borium",
+                    "Cu-EDTA 15%",
+                    "Mn-EDTA 5,8% opl.",
+                    "Fe-EDTA 13%",
+                    "Zn-EDTA 15%",
+                    "Demiwater"
+                ],
+                "Element": [
+                    "P2O5",
+                    "K2O",
+                    "N-Ureum",
+                    "Mo",
+                    "B",
+                    "Cu",
+                    "Mn",
+                    "Fe",
+                    "Zn",
+                    "Geen"
+                ],
+                "Eenheid": [
+                    "wt%",
+                    "wt%",
+                    "wt%",
+                    "mg/kg",
+                    "mg/kg",
+                    "mg/kg",
+                    "mg/kg",
+                    "mg/kg",
+                    "mg/kg",
+                    "wt%"
+                ],
+                "Gemeten_Concentratie": [
+                    27.0,
+                    18.0,
+                    3.0,
+                    10.0,
+                    100.0,
+                    200.0,
+                    100.0,
+                    200.0,
+                    2400.0,
+                    0.0
+                ],
+                "Spec": [
+                    27.0,
+                    18.0,
+                    3.0,
+                    10.0,
+                    100.0,
+                    200.0,
+                    100.0,
+                    200.0,
+                    2400.0,
+                    0.0
+                ],
+                "Min": [
+                    24.3,
+                    16.2,
+                    2.7,
+                    8.0,
+                    80.0,
+                    160.0,
+                    80.0,
+                    160.0,
+                    2300.0,
+                    0.0
+                ],
+                "Max": [
+                    29.7,
+                    19.8,
+                    3.3,
+                    12.0,
+                    120.0,
+                    240.0,
+                    120.0,
+                    240.0,
+                    2600.0,
+                    0.0
+                ],
+                "Concentratie_Grondstof": [
+                    30.0,
+                    20.0,
+                    46.0,
+                    4.1,
+                    4.5,
+                    15.0,
+                    5.8,
+                    13.0,
+                    15.0,
+                    0.0
+                ],
+                "Ratio_Element": [
+                    0.3,
+                    0.2,
+                    0.46,
+                    0.041,
+                    0.045,
+                    0.15,
+                    0.058,
+                    0.13,
+                    0.15,
+                    0.0
+                ],
+                "Notities": [
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    ""
+                ]
+            },
+            "Recept_ID": "NPK Protect 3+",
             "Status": "Actief",
             "Ingangsdatum": null,
             "Opmerkingen": "nan"
@@ -220,6 +482,87 @@
             },
             "Recept_ID": "Zero Waste Solution A",
             "Status": "Actief",
+            "Ingangsdatum": null,
+            "Opmerkingen": "nan"
+        },
+        "Zero Waste Solution B": {
+            "Hoeveelheid": 10000.0,
+            "Dichtheid": 1.49,
+            "Max_Volume": 14000.0,
+            "Data": {
+                "Grondstof": [
+                    "DKP 0-20-25",
+                    "DKP 0-20-25",
+                    "Hortispoor Molybdeen",
+                    "Natriumselenaat opl.",
+                    "Kaliumwolframaat opl."
+                ],
+                "Element": [
+                    "P2O5",
+                    "K2O",
+                    "Mo",
+                    "Se",
+                    "W"
+                ],
+                "Eenheid": [
+                    "wt%",
+                    "wt%",
+                    "mg/kg",
+                    "mg/kg",
+                    "mg/kg"
+                ],
+                "Gemeten_Concentratie": [
+                    19.87,
+                    24.84,
+                    127.0,
+                    21.0,
+                    482.0
+                ],
+                "Spec": [
+                    19.87,
+                    24.84,
+                    127.0,
+                    21.0,
+                    482.0
+                ],
+                "Min": [
+                    19.4,
+                    24.4,
+                    100.0,
+                    16.0,
+                    440.0
+                ],
+                "Max": [
+                    20.4,
+                    25.4,
+                    150.0,
+                    26.0,
+                    520.0
+                ],
+                "Concentratie_Grondstof": [
+                    20.0,
+                    25.0,
+                    4.1,
+                    6.4,
+                    17.1
+                ],
+                "Ratio_Element": [
+                    0.2,
+                    0.25,
+                    0.041,
+                    0.064,
+                    0.171
+                ],
+                "Notities": [
+                    "",
+                    "",
+                    "",
+                    "",
+                    ""
+                ]
+            },
+            "Recept_ID": "Zero Waste Solution B",
+            "Status": "Gearchiveerd",
             "Ingangsdatum": null,
             "Opmerkingen": "nan"
         }
