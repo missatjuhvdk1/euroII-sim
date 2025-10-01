@@ -1,6 +1,5 @@
 import io
 import json
-from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
 
@@ -80,11 +79,6 @@ COMPOSITION_NUMERIC_FIELDS = [
 ]
 
 DEFAULT_RECIPE_META = {"schema_version": 1, "template_version": TEMPLATE_VERSION}
-
-
-def is_placeholder_element(element: object) -> bool:
-    element_str = str(element).strip().lower() if element is not None else ""
-    return element_str in {"", "geen", "nan", "none"}
 
 
 def ensure_archive_directory() -> None:
@@ -724,22 +718,6 @@ with col_max_vol2:
 # Gegevens uit het geselecteerde recept
 data = recepten[recept]["Data"]
 df = pd.DataFrame(data)
-
-element_info_map: OrderedDict[str, dict[str, list]] = OrderedDict()
-for idx, row in df.iterrows():
-    element_key = row.get('Element')
-    info = element_info_map.setdefault(
-        element_key,
-        {"indices": [], "eenheden": [], "grondstoffen": []},
-    )
-    info["indices"].append(idx)
-    info["grondstoffen"].append(row.get('Grondstof'))
-    eenheid_val = row.get('Eenheid')
-    if pd.notna(eenheid_val):
-        eenheid_str = str(eenheid_val)
-        if eenheid_str not in info["eenheden"]:
-            info["eenheden"].append(eenheid_str)
-
 grondstoffen = list(dict.fromkeys(df['Grondstof']))
 grondstof_to_idx = {naam: idx for idx, naam in enumerate(grondstoffen)}
 row_to_grondstof_idx = df['Grondstof'].map(grondstof_to_idx).to_numpy(dtype=int)
@@ -767,121 +745,29 @@ if (
 with st.expander("Gemeten Concentratie per Element", expanded=True):
     st.info("Voer de gemeten concentraties in (wt% of mg/kg, afhankelijk van de eenheid).")
     measured_concentrations = {}
-    for element, info in element_info_map.items():
-        indices = info["indices"]
-        if not indices:
-            continue
-        first_idx = indices[0]
-        eenheden = [val for val in info["eenheden"] if str(val).strip().lower() != "nan"]
-        eenheid = eenheden[0] if eenheden else str(df.at[first_idx, 'Eenheid'])
-        grondstof_label = ", ".join(dict.fromkeys(info["grondstoffen"]) ) if info["grondstoffen"] else ""
-
-        if is_placeholder_element(element):
+    for idx, row in df.iterrows():
+        element = row['Element']
+        eenheid = row['Eenheid']
+        default_conc = row['Gemeten_Concentratie']  # From recepten data
+        if element != 'Geen':
+            conc = st.number_input(
+                f"{element} ({eenheid}) voor {row['Grondstof']}",
+                value=float(default_conc),
+                step=0.01 if eenheid == 'wt%' else 1.0,
+                min_value=0.0,
+                format="%.2f" if eenheid == 'wt%' else "%.0f",
+                key=f"conc_{recept}_{tank}_{element}",
+                help=f"Voer de gemeten concentratie van {element} in {eenheid}."
+            )
+            measured_concentrations[element] = conc
+        else:
             measured_concentrations[element] = 0.0
             st.number_input(
-                f"{element} ({eenheid})" + (f" voor {grondstof_label}" if grondstof_label else ""),
+                f"{element} ({eenheid}) voor {row['Grondstof']}",
                 value=0.0,
                 disabled=True,
-                key=f"conc_{recept}_{tank}_{element}_{first_idx}",
-                help="Geen meting vereist voor deze component."
+                key=f"conc_{recept}_{tank}_{element}"
             )
-            continue
-
-        if len(eenheden) > 1:
-            st.error(
-                f"Element {element} heeft meerdere eenheden ({', '.join(eenheden)}). Harmoniseer de invoer."
-            )
-            st.stop()
-
-        default_conc = float(df.at[first_idx, 'Gemeten_Concentratie'])
-        is_wt_pct = eenheid == 'wt%'
-        step_value = 0.01 if is_wt_pct else 1.0
-        format_str = "%.2f" if is_wt_pct else "%.0f"
-        help_text = f"Bronnen: {grondstof_label}" if grondstof_label else None
-
-        conc = st.number_input(
-            f"{element} ({eenheid})" + (f" voor {grondstof_label}" if grondstof_label else ""),
-            value=default_conc,
-            step=step_value,
-            min_value=0.0,
-            format=format_str,
-            key=f"conc_{recept}_{tank}_{element}",
-            help=help_text,
-        )
-        measured_concentrations[element] = conc
-
-    for placeholder_element in element_info_map:
-        if is_placeholder_element(placeholder_element):
-            measured_concentrations.setdefault(placeholder_element, 0.0)
-
-df['Gemeten Concentratie'] = df['Element'].map(measured_concentrations).fillna(0.0)
-
-element_groups = []
-element_actuele_mass_map: dict[str, float] = {}
-
-for element, info in element_info_map.items():
-    indices = info["indices"]
-    if not indices:
-        continue
-    if is_placeholder_element(element):
-        element_actuele_mass_map[element] = 0.0
-        continue
-
-    eenheden = [val for val in info["eenheden"] if str(val).strip().lower() != "nan"]
-    eenheid = eenheden[0] if eenheden else str(df.at[indices[0], 'Eenheid'])
-    if len(eenheden) > 1:
-        st.error(
-            f"Element {element} heeft meerdere eenheden ({', '.join(eenheden)}). Harmoniseer de invoer."
-        )
-        st.stop()
-
-    measured_value = float(measured_concentrations.get(element, 0.0))
-    conversie_factor = 100 if eenheid == 'wt%' else 1_000_000
-    actuele_mass = (massa_product * measured_value) / conversie_factor if conversie_factor else 0.0
-    element_actuele_mass_map[element] = actuele_mass
-
-    spec_series = df.loc[indices, 'Spec'].astype(float)
-    min_series = df.loc[indices, 'Min'].astype(float)
-    max_series = df.loc[indices, 'Max'].astype(float)
-
-    spec_values = spec_series.dropna().unique()
-    min_values = min_series.dropna().unique()
-    max_values = max_series.dropna().unique()
-
-    if len(spec_values) > 1:
-        st.error(f"Element {element} heeft verschillende Spec-waarden ({spec_values}). Harmoniseer de data.")
-        st.stop()
-    if len(min_values) > 1:
-        st.error(f"Element {element} heeft verschillende Min-waarden ({min_values}). Harmoniseer de data.")
-        st.stop()
-    if len(max_values) > 1:
-        st.error(f"Element {element} heeft verschillende Max-waarden ({max_values}). Harmoniseer de data.")
-        st.stop()
-
-    spec_value = float(spec_series.iloc[0]) if not spec_series.empty and pd.notna(spec_series.iloc[0]) else 0.0
-    min_value = float(min_series.iloc[0]) if not min_series.empty and pd.notna(min_series.iloc[0]) else 0.0
-    max_value = float(max_series.iloc[0]) if not max_series.empty and pd.notna(max_series.iloc[0]) else 0.0
-
-    ratios = df.loc[indices, 'Ratio_Element'].astype(float).to_numpy()
-    grondstof_indices = row_to_grondstof_idx[indices].astype(int)
-
-    element_groups.append(
-        {
-            'element': element,
-            'eenheid': eenheid,
-            'indices': indices,
-            'ratios': ratios,
-            'grondstof_indices': grondstof_indices,
-            'actuele_mass': actuele_mass,
-            'spec': spec_value,
-            'min': min_value,
-            'max': max_value,
-        }
-    )
-
-element_actuele_mass_map.setdefault('Geen', 0.0)
-element_actuele_mass_map.setdefault('nan', 0.0)
-
 
 # Optimalisatie Penalties
 with st.expander("Optimalisatie Penalties", expanded=True):
@@ -972,7 +858,15 @@ with st.expander("Stapgroottes", expanded=False):
         )
         st.session_state.stapgroottes[grondstof] = int(step_value)
 
+# Update DataFrame met ingevoerde concentraties
+df['Gemeten Concentratie'] = df['Element'].map(measured_concentrations)
+
 # Berekeningen zoals in Excel
+def bereken_actuele_hoeveelheid_element(row, massa_product):
+    """Berekening kolom F: Actuele hoeveelheid element in kg."""
+    conversie_factor = 100 if row['Eenheid'] == 'wt%' else 1000000
+    return (massa_product * row['Gemeten Concentratie']) / conversie_factor
+
 def bereken_actuele_hoeveelheid_grondstof(row):
     """Berekening kolom G: Actuele hoeveelheid grondstof in kg."""
     if row['Ratio_Element'] == 0:
@@ -983,40 +877,30 @@ def bereken_toegevoegd_element(row):
     """Berekening kolom I: Toegevoegd element door grondstoftoevoeging."""
     return row['Toevoegen Grondstof'] * row['Ratio_Element']
 
-def bereken_element_concentraties_na_opt(element_groups, toevoegingen_grondstof, totale_massa):
-    """Bepaal concentraties per element na optimalisatie."""
-
-    resultaat = {}
-    for group in element_groups:
-        element_naam = group['element']
-        conversie_factor = 100 if str(group['eenheid']).lower() == 'wt%' else 1_000_000
-        totale_toevoeging = 0.0
-        for ratio, grond_idx in zip(group['ratios'], group['grondstof_indices']):
-            coef = float(ratio)
-            if coef == 0.0:
-                continue
-            totale_toevoeging += float(toevoegingen_grondstof[int(grond_idx)]) * coef
-        totale_element = float(group['actuele_mass']) + totale_toevoeging
-        if totale_massa > 0:
-            resultaat[element_naam] = (totale_element / totale_massa) * conversie_factor
-        else:
-            resultaat[element_naam] = 0.0
-
-    resultaat.setdefault('Geen', 0.0)
-    resultaat.setdefault('nan', 0.0)
-    return resultaat
+def bereken_gecorrigeerde_concentratie(row, totale_massa_correctie):
+    """Berekening kolom J: Gecorrigeerde concentratie na toevoeging."""
+    conversie_factor = 100 if row['Eenheid'] == 'wt%' else 1000000
+    totale_element = row['Actuele_Hoeveelheid_Element'] + row['Geoptimaliseerde_Toegevoegd_Element']
+    return (totale_element / totale_massa_correctie) * conversie_factor
 
 # Bereken actuele hoeveelheid element (kolom F)
-df['Actuele_Hoeveelheid_Element'] = df['Element'].map(element_actuele_mass_map).fillna(0.0)
+df['Actuele_Hoeveelheid_Element'] = df.apply(bereken_actuele_hoeveelheid_element, axis=1, massa_product=massa_product)
 
 # Bereken actuele hoeveelheid grondstof (kolom G)
 df['Actuele_Hoeveelheid_Grondstof'] = df.apply(bereken_actuele_hoeveelheid_grondstof, axis=1)
 
 def optimize_toevoegingen(
     massa_product,
-    element_groups,
+    actuele_hoeveelheden,
+    ratios,
+    elementen,
+    eenheden,
+    min_specs,
+    max_specs,
+    specs,
     use_max_volume,
     max_volume,
+    row_to_grondstof_idx,
     grondstoffen,
     stapgroottes_grondstof,
     kosten_grondstof,
@@ -1071,50 +955,42 @@ def optimize_toevoegingen(
     totale_massa_expr = massa_product + fixed_add_mass + lpSum(var_toevoegingen.values())
     effective_massa = massa_product + fixed_add_mass
 
-    diagnostics: list[str] = []
-    target_groups: list[int] = []
+    effective_actuele = []
+    for i, actuele in enumerate(actuele_hoeveelheden):
+        grond_idx = int(row_to_grondstof_idx[i])
+        fixed_add = fixed_grondstoffen.get(grond_idx, 0.0)
+        effective_actuele.append(actuele + fixed_add * ratios[i])
+
+    diagnostics = []
+    target_set: list[int] = []
     targets: dict[int, float] = {}
 
-    def build_element_expression(group: dict[str, object]):
-        terms: list = []
-        for ratio, grond_idx in zip(group['ratios'], group['grondstof_indices']):
-            coef = float(ratio)
-            if coef == 0:
-                continue
-            expr = toevoegingen_grondstof[int(grond_idx)]
-            terms.append(coef * expr)
-        return lpSum(terms) if terms else 0.0
+    for i in range(len(ratios)):
+        grond_idx = int(row_to_grondstof_idx[i])
+        if ratios[i] == 0 or grond_idx in excluded_grondstoffen:
+            diagnostics.append(f"{elementen[i]}: uitgesloten of ratio 0, overgeslagen")
+            continue
 
-    for idx, group in enumerate(element_groups):
-        conversie_factor = 100 if str(group['eenheid']).lower() == "wt%" else 1_000_000
-        fixed_contrib = sum(
-            fixed_grondstoffen.get(int(g_idx), 0.0) * float(ratio)
-            for ratio, g_idx in zip(group['ratios'], group['grondstof_indices'])
-        )
-        huidige_mass = float(group['actuele_mass']) + fixed_contrib
-        current_conc = (huidige_mass / effective_massa) * conversie_factor if effective_massa > 0 else 0.0
+        conversie_factor = 100 if eenheden[i] == "wt%" else 1_000_000
+        current_conc = (effective_actuele[i] / effective_massa) * conversie_factor if effective_massa > 0 else 0
 
-        spec_val = float(group['spec'])
-        min_val = float(group['min'])
-        max_val = float(group['max'])
-
-        if current_conc < spec_val:
-            target_groups.append(idx)
-            target_val = (min_val + spec_val) / 2.0
-            targets[idx] = target_val
-            diag_msg = f"mid tussen Min {min_val:.2f} en Spec {spec_val:.2f}"
-        elif current_conc > spec_val:
-            target_groups.append(idx)
-            target_val = (spec_val + max_val) / 2.0
-            targets[idx] = target_val
-            diag_msg = f"mid tussen Spec {spec_val:.2f} en Max {max_val:.2f}"
+        if current_conc < specs[i]:
+            target_set.append(i)
+            target = (min_specs[i] + specs[i]) / 2
+            targets[i] = target
+            diag_msg = f"mid tussen Min {min_specs[i]:.2f} en Spec {specs[i]:.2f}"
+        elif current_conc > specs[i]:
+            target_set.append(i)
+            target = (specs[i] + max_specs[i]) / 2
+            targets[i] = target
+            diag_msg = f"mid tussen Spec {specs[i]:.2f} en Max {max_specs[i]:.2f}"
         else:
-            target_val = None
             diag_msg = f"Op of gelijk aan Spec, geen target (huidig: {current_conc:.2f})"
 
-        target_str = f"{target_val:.2f}" if target_val is not None else "None"
+        target_value = targets.get(i)
+        target_str = f"{target_value:.2f}" if isinstance(target_value, (int, float)) else "None"
         diagnostics.append(
-            f"{group['element']} target: {target_str} ({diag_msg}, huidig: {current_conc:.2f})"
+            f"{elementen[i]} target: {target_str} ({diag_msg}, huidig: {current_conc:.2f})"
         )
 
     total_add_expr = fixed_add_mass + lpSum(var_toevoegingen.values())
@@ -1123,32 +999,37 @@ def optimize_toevoegingen(
     )
     objective += mass_penalty * total_add_expr
 
-    for idx in target_groups:
-        group = element_groups[idx]
-        conversie_factor = 100 if str(group['eenheid']).lower() == "wt%" else 1_000_000
-        element_expr = build_element_expression(group)
-        totale_element = element_expr + float(group['actuele_mass'])
-        target_element_mass = targets[idx] * totale_massa_expr / conversie_factor
-        dev_plus = LpVariable(f"dev_plus_{idx}", lowBound=0)
-        dev_minus = LpVariable(f"dev_minus_{idx}", lowBound=0)
-        prob += totale_element == target_element_mass + dev_plus - dev_minus, f"target_dev_{idx}"
+    for i in target_set:
+        grond_idx = int(row_to_grondstof_idx[i])
+        conversie_factor = 100 if eenheden[i] == "wt%" else 1_000_000
+        fixed_element = effective_actuele[i] - fixed_grondstoffen.get(grond_idx, 0.0) * ratios[i]
+        totale_element = toevoegingen_grondstof[grond_idx] * ratios[i] + fixed_element
+        target_element_mass = targets[i] * totale_massa_expr / conversie_factor
+        dev_plus = LpVariable(f"dev_plus_{i}", lowBound=0)
+        dev_minus = LpVariable(f"dev_minus_{i}", lowBound=0)
+        prob += totale_element == target_element_mass + dev_plus - dev_minus, f"target_dev_{i}"
         objective += deviation_weight * (dev_plus + dev_minus)
 
-    for idx, group in enumerate(element_groups):
-        conversie_factor = 100 if str(group['eenheid']).lower() == "wt%" else 1_000_000
-        element_expr = build_element_expression(group)
-        totale_element = element_expr + float(group['actuele_mass'])
-        band = float(group['max'] - group['min'])
+    for i in range(len(ratios)):
+        grond_idx = int(row_to_grondstof_idx[i])
+        if ratios[i] == 0 or grond_idx in excluded_grondstoffen:
+            continue
+
+        conversie_factor = 100 if eenheden[i] == "wt%" else 1_000_000
+        fixed_element = effective_actuele[i] - fixed_grondstoffen.get(grond_idx, 0.0) * ratios[i]
+        totale_element = toevoegingen_grondstof[grond_idx] * ratios[i] + fixed_element
+        # Apply guard band: tighten Min/Max by a percentage of the band
+        band = float(max_specs[i] - min_specs[i])
         margin = max(0.0, min(float(guard_band_pct), 49.0)) / 100.0 * band
-        min_tight = float(group['min']) + margin
-        max_tight = float(group['max']) - margin
+        min_tight = min_specs[i] + margin
+        max_tight = max_specs[i] - margin
         if min_tight > max_tight:
-            mid = (float(group['min']) + float(group['max'])) / 2.0
+            mid = (float(min_specs[i]) + float(max_specs[i])) / 2.0
             min_tight = max_tight = mid
         min_element_mass = min_tight * totale_massa_expr / conversie_factor
         max_element_mass = max_tight * totale_massa_expr / conversie_factor
-        prob += totale_element >= min_element_mass, f"Min_{idx}"
-        prob += totale_element <= max_element_mass, f"Max_{idx}"
+        prob += totale_element >= min_element_mass, f"Min_{i}"
+        prob += totale_element <= max_element_mass, f"Max_{i}"
 
     prob += objective
 
@@ -1233,14 +1114,21 @@ if st.button("Bereken Geoptimaliseerde Toevoegingen", help="Klik om de optimalis
         )
 
         optimized_toevoegingen_grond, optimized_totale_massa, status = optimize_toevoegingen(
-            massa_product,
-            element_groups,
-            use_max_volume,
-            max_volume_liters,
+            massa_product, 
+            df['Actuele_Hoeveelheid_Element'].values, 
+            df['Ratio_Element'].values,
+            df['Element'].values,
+            df['Eenheid'].values, 
+            df['Min'].values, 
+            df['Max'].values, 
+            df['Spec'].values,
+            use_max_volume, 
+            max_volume_liters, 
+            row_to_grondstof_idx,
             grondstoffen,
             stapgroottes_grondstof,
             kosten_grondstof,
-            st.session_state.mass_penalty,
+            st.session_state.mass_penalty, 
             st.session_state.deviation_weight,
             st.session_state.guard_band_pct,
             excluded_grondstoffen=[],  # Geen exclusies voor originele optimalisatie
@@ -1255,30 +1143,32 @@ if st.button("Bereken Geoptimaliseerde Toevoegingen", help="Klik om de optimalis
                     if i not in refine_indices
                 }
                 optimized_toevoegingen_grond, optimized_totale_massa, status = optimize_toevoegingen(
-                    massa_product,
-                    element_groups,
-                    use_max_volume,
-                    max_volume_liters,
+                    massa_product, 
+                    df['Actuele_Hoeveelheid_Element'].values, 
+                    df['Ratio_Element'].values,
+                    df['Element'].values,
+                    df['Eenheid'].values, 
+                    df['Min'].values, 
+                    df['Max'].values, 
+                    df['Spec'].values,
+                    use_max_volume, 
+                    max_volume_liters, 
+                    row_to_grondstof_idx,
                     grondstoffen,
                     stapgroottes_grondstof,
                     kosten_grondstof,
-                    st.session_state.mass_penalty,
+                    st.session_state.mass_penalty, 
                     st.session_state.deviation_weight,
                     st.session_state.guard_band_pct,
                     excluded_grondstoffen=[],
                     fixed_grondstoffen=fixed_values,
-                    refine=True,
+                    refine=True
                 )
             if status == "Succes":
                 toevoegingen_per_rij = optimized_toevoegingen_grond[row_to_grondstof_idx]
                 df['Toevoegen Grondstof'] = toevoegingen_per_rij
                 df['Geoptimaliseerde_Toegevoegd_Element'] = df.apply(bereken_toegevoegd_element, axis=1)
-                na_opt_map = bereken_element_concentraties_na_opt(
-                    element_groups,
-                    optimized_toevoegingen_grond,
-                    optimized_totale_massa,
-                )
-                df['Na Optimalisatie'] = df['Element'].map(lambda e: na_opt_map.get(e, 0.0))
+                df['Na Optimalisatie'] = df.apply(bereken_gecorrigeerde_concentratie, axis=1, totale_massa_correctie=optimized_totale_massa)
                 df['Binnen Specs'] = (df['Na Optimalisatie'] >= df['Min']) & (df['Na Optimalisatie'] <= df['Max'])
                 st.session_state.optimized_resultaten = df[['Grondstof', 'Element', 'Gemeten Concentratie', 'Toevoegen Grondstof', 'Na Optimalisatie', 'Spec', 'Min', 'Max', 'Binnen Specs', 'Eenheid']].copy()
                 st.session_state.optimized_status = status
@@ -1412,17 +1302,24 @@ if st.session_state.optimized_toevoegingen_grond is not None:
             )
 
             adj_optimized_toevoegingen, adj_optimized_totale_massa, adj_status = optimize_toevoegingen(
-                massa_product,
-                element_groups,
-                use_max_volume,
-                max_volume_liters,
+                massa_product, 
+                adj_df['Actuele_Hoeveelheid_Element'].values, 
+                adj_df['Ratio_Element'].values,
+                adj_df['Element'].values,
+                adj_df['Eenheid'].values, 
+                adj_df['Min'].values, 
+                adj_df['Max'].values, 
+                adj_df['Spec'].values,
+                use_max_volume, 
+                max_volume_liters, 
+                row_to_grondstof_idx,
                 grondstoffen,
-                stapgroottes_grondstof,
+                stapgroottes_grondstof, 
                 kosten_grondstof,
-                st.session_state.mass_penalty,
+                st.session_state.mass_penalty, 
                 st.session_state.deviation_weight,
                 st.session_state.guard_band_pct,
-                excluded_grondstoffen=st.session_state.excluded_grondstoffen,
+                excluded_grondstoffen=st.session_state.excluded_grondstoffen
             )
             if adj_status == "Succes":
                 # Check for small additions to refine
@@ -1436,30 +1333,32 @@ if st.session_state.optimized_toevoegingen_grond is not None:
                         if i not in refine_indices
                     }
                     adj_optimized_toevoegingen, adj_optimized_totale_massa, adj_status = optimize_toevoegingen(
-                        massa_product,
-                        element_groups,
-                        use_max_volume,
-                        max_volume_liters,
+                        massa_product, 
+                        adj_df['Actuele_Hoeveelheid_Element'].values, 
+                        adj_df['Ratio_Element'].values,
+                        adj_df['Element'].values,
+                        adj_df['Eenheid'].values, 
+                        adj_df['Min'].values, 
+                        adj_df['Max'].values, 
+                        adj_df['Spec'].values,
+                        use_max_volume, 
+                        max_volume_liters, 
+                        row_to_grondstof_idx,
                         grondstoffen,
                         stapgroottes_grondstof,
                         kosten_grondstof,
-                        st.session_state.mass_penalty,
+                        st.session_state.mass_penalty, 
                         st.session_state.deviation_weight,
                         st.session_state.guard_band_pct,
                         excluded_grondstoffen=st.session_state.excluded_grondstoffen,
                         fixed_grondstoffen=fixed_values,
-                        refine=True,
+                        refine=True
                     )
             if adj_status == "Succes":
                 adj_toevoegingen_per_rij = adj_optimized_toevoegingen[row_to_grondstof_idx]
                 adj_df['Toevoegen Grondstof'] = adj_toevoegingen_per_rij
                 adj_df['Geoptimaliseerde_Toegevoegd_Element'] = adj_df.apply(bereken_toegevoegd_element, axis=1)
-                adj_na_opt_map = bereken_element_concentraties_na_opt(
-                    element_groups,
-                    adj_optimized_toevoegingen,
-                    adj_optimized_totale_massa,
-                )
-                adj_df['Na Optimalisatie'] = adj_df['Element'].map(lambda e: adj_na_opt_map.get(e, 0.0))
+                adj_df['Na Optimalisatie'] = adj_df.apply(bereken_gecorrigeerde_concentratie, axis=1, totale_massa_correctie=adj_optimized_totale_massa)
                 adj_df['Binnen Specs'] = (adj_df['Na Optimalisatie'] >= adj_df['Min']) & (adj_df['Na Optimalisatie'] <= adj_df['Max'])
                 st.session_state.optimized_toevoegingen_grond = adj_optimized_toevoegingen
                 st.session_state.optimized_toevoegingen_rows = adj_toevoegingen_per_rij

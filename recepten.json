@@ -2,12 +2,12 @@
     "meta": {
         "schema_version": 1,
         "template_version": "2024.07",
-        "last_uploaded_at": "2025-09-25T16:56:25.592979",
+        "last_uploaded_at": "2025-10-01T08:18:13.800071",
         "bron": "excel-upload",
-        "archive_file": "recepten_upload_20250925-165625.xlsx",
-        "total_recipes": 6,
-        "total_componenten": 37,
-        "last_updated": "2025-09-25T16:56:25.592979"
+        "archive_file": "recepten_upload_20251001-081813.xlsx",
+        "total_recipes": 7,
+        "total_componenten": 42,
+        "last_updated": "2025-10-01T08:18:13.800071"
     },
     "recipes": {
         "ANDY Powermix 1050": {
@@ -137,6 +137,87 @@
                 ]
             },
             "Recept_ID": "ANDY Powermix 1050",
+            "Status": "Actief",
+            "Ingangsdatum": null,
+            "Opmerkingen": "nan"
+        },
+        "CalMag Liquid": {
+            "Hoeveelheid": 10000.0,
+            "Dichtheid": 1.41,
+            "Max_Volume": 14000.0,
+            "Data": {
+                "Grondstof": [
+                    "Calciumnitraat 51%",
+                    "Calciumnitraat 51%",
+                    "Magnesiumnitraat 37%",
+                    "Magnesiumnitraat 37%",
+                    "Demiwater"
+                ],
+                "Element": [
+                    "CaO",
+                    "N-NO3",
+                    "MgO",
+                    "N-NO3",
+                    "Geen"
+                ],
+                "Eenheid": [
+                    "wt%",
+                    "wt%",
+                    "wt%",
+                    "wt%",
+                    "wt%"
+                ],
+                "Gemeten_Concentratie": [
+                    10.0,
+                    7.8,
+                    4.0,
+                    7.8,
+                    0.0
+                ],
+                "Spec": [
+                    10.0,
+                    7.8,
+                    4.0,
+                    7.8,
+                    0.0
+                ],
+                "Min": [
+                    9.7,
+                    7.5,
+                    3.8,
+                    7.5,
+                    0.0
+                ],
+                "Max": [
+                    10.3,
+                    8.1,
+                    4.2,
+                    8.1,
+                    0.0
+                ],
+                "Concentratie_Grondstof": [
+                    17.5,
+                    8.7,
+                    10.05,
+                    7.09,
+                    0.0
+                ],
+                "Ratio_Element": [
+                    0.175,
+                    0.087,
+                    0.1005,
+                    0.0709,
+                    0.0
+                ],
+                "Notities": [
+                    "",
+                    "",
+                    "",
+                    "",
+                    ""
+                ]
+            },
+            "Recept_ID": "CalMag Liquid",
             "Status": "Actief",
             "Ingangsdatum": null,
             "Opmerkingen": "nan"
@@ -562,7 +643,7 @@
                 ]
             },
             "Recept_ID": "Zero Waste Solution B",
-            "Status": "Gearchiveerd",
+            "Status": "Actief",
             "Ingangsdatum": null,
             "Opmerkingen": "nan"
         }
