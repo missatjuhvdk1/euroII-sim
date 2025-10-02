@@ -245,6 +245,12 @@ def _verify_jwt(token: str) -> Optional[User]:
 def _get_cookie() -> Optional[str]:
     cm = _cookie_manager()
     try:
+        # Force a sync of cookies so that on first render the
+        # component has a chance to load existing cookies.
+        try:
+            _ = cm.get_all()
+        except Exception:
+            pass
         return cm.get(COOKIE_NAME)
     except TypeError:
         try:
@@ -268,6 +274,12 @@ def _set_cookie(token: str, ttl: int) -> None:
     ]:
         try:
             cm.set(*args, **kwargs)
+            # Cache in session as a short-term fallback in case the
+            # front-end hasn't persisted the cookie before a rerun.
+            try:
+                st.session_state["__auth_token__"] = token
+            except Exception:
+                pass
             return
         except TypeError:
             continue
@@ -281,6 +293,12 @@ def _clear_cookie() -> None:
             cm.delete(cookie=COOKIE_NAME)
         except TypeError:
             pass
+    # Also clear session fallback
+    try:
+        if "__auth_token__" in st.session_state:
+            del st.session_state["__auth_token__"]
+    except Exception:
+        pass
 
 def _users_find(email: str) -> Optional[Dict[str, Any]]:
     data = _load_users()
@@ -639,7 +657,11 @@ def _rerun():
 def current_user() -> Optional[User]:
     token = _get_cookie()
     if not token:
-        return None
+        # Fallback to a cached session token immediately after login
+        # before the browser has persisted cookies.
+        token = st.session_state.get("__auth_token__")
+        if not token:
+            return None
     return _verify_jwt(token)
 
 def _consume_verification_token(token: str) -> Tuple[bool, str]:
