@@ -20,6 +20,28 @@ from pulp import (
 # Set page configuration for wide mode at the start
 st.set_page_config(layout="wide")
 
+# --- Authentication gate ---
+try:
+    from auth_local import (
+        login_gate,
+        sidebar_user_pill,
+        require_role,
+        show_login_toast,
+        _clear_cookie,
+        _rerun,
+    )
+    user = login_gate()
+    # Remove persistent sidebar user pill and top logout button; handled below near filters
+    # show a brief bottom-right toast after login
+    try:
+        show_login_toast()
+    except Exception:
+        pass
+except Exception as _auth_exc:
+    # If auth module is missing or errors, show a clear message including details
+    st.error(f"Authenticatie-module ontbreekt of faalt: {_auth_exc}. Controleer 'auth_local.py' en dependencies.")
+    st.stop()
+
 BASE_DIR = Path.cwd()
 RECEPTEN_PATH = BASE_DIR / "recepten.json"
 TANKS_PATH = BASE_DIR / "tanks.json"
@@ -646,6 +668,8 @@ except json.JSONDecodeError as exc:
 modus = st.sidebar.radio("Kies scherm", ("Rekenmodule", "Receptbeheer"), index=0)
 
 if modus == "Receptbeheer":
+    # Restrict recipe management to admins
+    require_role(user, allowed=("admin",))
     render_recipe_management(recepten, recepten_meta)
     st.stop()
 
@@ -667,6 +691,15 @@ geselecteerde_statussen = st.sidebar.multiselect(
     default=standaard_status,
     help="Recepten buiten de geselecteerde status(sen) worden verborgen in de rekenmodule."
 )
+
+# Place the logout button directly under the filter in the sidebar
+with st.sidebar:
+    st.markdown("---")
+    if st.button("Uitloggen", key="logout_btn_under_filter"):
+        try:
+            _clear_cookie()
+        finally:
+            _rerun()
 
 if not geselecteerde_statussen:
     st.warning("Selecteer minimaal één status om recepten te tonen.")
