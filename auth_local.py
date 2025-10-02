@@ -28,7 +28,35 @@ APP_NAME = os.getenv("APP_NAME", "Rekenmodule")
 # Example: https://app.example.com
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://runs-eden-beans-ebook.trycloudflare.com/")
 
-COOKIE_SECRET = os.getenv("COOKIE_SECRET", secrets.token_urlsafe(64))
+def _get_or_create_cookie_secret() -> str:
+    # Prefer env var if provided
+    env_secret = os.getenv("COOKIE_SECRET")
+    if env_secret:
+        return env_secret
+    # Persist a generated secret to a file so refreshes keep tokens valid
+    secret_file = os.getenv(
+        "COOKIE_SECRET_FILE",
+        os.path.join(os.getcwd(), "dist", "auth_cookie_secret.key"),
+    )
+    try:
+        os.makedirs(os.path.dirname(secret_file) or ".", exist_ok=True)
+        if os.path.exists(secret_file):
+            with open(secret_file, "r", encoding="utf-8") as f:
+                s = f.read().strip()
+                if s:
+                    return s
+    except Exception:
+        pass
+    # Generate and store
+    s = secrets.token_urlsafe(64)
+    try:
+        with open(secret_file, "w", encoding="utf-8") as f:
+            f.write(s)
+    except Exception:
+        pass
+    return s
+
+COOKIE_SECRET = _get_or_create_cookie_secret()
 USERS_JSON_PATH = os.getenv("USERS_JSON_PATH", os.path.join(os.getcwd(), "users.json"))
 USERS_LOCK_PATH = USERS_JSON_PATH + ".lock"
 
@@ -226,12 +254,17 @@ def _get_cookie() -> Optional[str]:
 
 def _set_cookie(token: str, ttl: int) -> None:
     cm = _cookie_manager()
+    # Try multiple signatures for compatibility across versions of extra_streamlit_components
+    # Also try to set a long-lived expiry where supported.
+    expires_days = max(1, int(ttl // (60 * 60 * 24)))
     for args, kwargs in [
         ((COOKIE_NAME, token), {}),
         ((), {"key": COOKIE_NAME, "value": token}),
         ((), {"cookie": COOKIE_NAME, "value": token}),
         ((), {"key": COOKIE_NAME, "value": token, "path": "/"}),
         ((), {"cookie": COOKIE_NAME, "value": token, "path": "/"}),
+        ((), {"key": COOKIE_NAME, "value": token, "path": "/", "expires_days": expires_days}),
+        ((), {"cookie": COOKIE_NAME, "value": token, "path": "/", "expires_days": expires_days}),
     ]:
         try:
             cm.set(*args, **kwargs)
@@ -579,7 +612,7 @@ def _auth_forms() -> Optional[User]:
                 if not rec:
                     st.info("Als het e-mailadres bestaat, is een e-mail verzonden.")
                 else:
-                    _smtp_healthcheck()  # Optional: check SMTP before proceeding
+                    #_smtp_healthcheck()  # Optional: check SMTP before proceeding
                     token = _create_token()
                     rec["reset_token"] = token
                     rec["reset_expires"] = int((_utcnow() + timedelta(seconds=RESET_TOKEN_TTL_SECONDS)).timestamp())
@@ -658,16 +691,16 @@ def _handle_magic_links() -> None:
     reset_token = q.get("reset")
     if verify_token:
         ok, msg = _consume_verification_token(verify_token)
-        if ok:
-            st.success(msg)
-        else:
-            st.error(msg)
-        # Clear the param to avoid re-processing
+        # Store as flash and return to clean login screen
+        st.session_state["_flash_notice"] = {"level": ("success" if ok else "error"), "msg": msg}
         try:
             del st.query_params["verify"]
         except Exception:
             pass
+        _rerun()
+        st.stop()
     if reset_token:
+        # Show only the reset form; suppress the rest of the auth UI.
         st.markdown("## Nieuw wachtwoord instellen")
         with st.form("reset_form", clear_on_submit=False):
             pw1 = st.text_input("Nieuw wachtwoord", type="password", key="pw_new_1")
@@ -679,14 +712,26 @@ def _handle_magic_links() -> None:
             else:
                 ok, msg = _consume_reset_token_and_update_password(reset_token, pw1)
                 if ok:
-                    st.success(msg)
+                    # On success, flash and return to clean login screen
+                    st.session_state["_flash_notice"] = {"level": "success", "msg": msg}
                     try:
                         del st.query_params["reset"]
                     except Exception:
                         pass
-                    st.info("Ga naar het tabblad ‘Inloggen’ om verder te gaan.")
+                    _rerun()
+                    st.stop()
                 else:
                     st.error(msg)
+        # Provide a back-to-login action
+        if st.button("Terug naar inloggen", key="back_to_login_from_reset"):
+            try:
+                del st.query_params["reset"]
+            except Exception:
+                pass
+            _rerun()
+            st.stop()
+        # Stop here so the regular auth forms are not rendered beneath
+        st.stop()
 
 def login_gate() -> User:
     _inject_layout_css()
