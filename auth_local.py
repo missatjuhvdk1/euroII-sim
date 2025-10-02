@@ -24,6 +24,7 @@ from streamlit.components.v1 import html as st_html
 load_dotenv(override=True)
 
 APP_NAME = os.getenv("APP_NAME", "Rekenmodule")
+AUTH_DEBUG = os.getenv("AUTH_DEBUG", "0") == "1"
 
 # Base URL used in links sent by email. Required if your app is not hosted at root.
 # Example: https://app.example.com
@@ -67,12 +68,12 @@ USERS_LOCK_PATH = USERS_JSON_PATH + ".lock"
 ALLOWED_EMAIL_DOMAINS = {"euroliquids.com", "ttd.com", "gmail.com"}
 
 # SMTP (optional but recommended for production)
-SMTP_HOST = os.getenv("SMTP_HOST", "")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "0") or 0)
-SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", "meesvdk20@gmail.com")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "dungiuqrgshueiap")
 SMTP_STARTTLS = bool(os.getenv("SMTP_STARTTLS", "1") == "1")
-MAIL_FROM = os.getenv("MAIL_FROM", "")
+MAIL_FROM = os.getenv("MAIL_FROM", SMTP_USERNAME)
 
 # Optional hardcoded dev SMTP (used only if env is empty). Fill these to send via Gmail/other.
 DEV_SMTP_HOST = ""  # optional local/dev SMTP host
@@ -593,7 +594,7 @@ def _auth_forms() -> Optional[User]:
                 st.error(msg)
             else:
                 st.info(msg)
-        if code:
+        if code and AUTH_DEBUG:
             try:
                 st.code(str(code), language="text")
             except Exception:
@@ -651,10 +652,11 @@ def _auth_forms() -> Optional[User]:
                                 if sent:
                                     st.info("Verificatie e-mail verzonden.")
                                 else:
-                                    st.info("Verificatielink is gegenereerd. Controleer de console of e-mailconfiguratie.")
-                                    verify_url = _build_app_url_with_query({"verify": token})
-                                    st.code(verify_url, language="text")
-                                    st.markdown(f"[Open link]({verify_url})")
+                                    st.info("Verificatielink is gegenereerd. Neem contact op met de beheerder.")
+                                    if AUTH_DEBUG:
+                                        verify_url = _build_app_url_with_query({"verify": token})
+                                        st.code(verify_url, language="text")
+                                        st.markdown(f"[Open link]({verify_url})")
                             st.stop()
                         role = _effective_role(email)
                         ttl = COOKIE_TTL
@@ -703,11 +705,10 @@ def _auth_forms() -> Optional[User]:
                                     "msg": "Account aangemaakt. Controleer je inbox om je e-mailadres te verifiëren. Na verificatie kun je inloggen.",
                                 }
                             else:
-                                verify_url = _build_app_url_with_query({"verify": token})
                                 st.session_state["_flash_notice"] = {
                                     "level": "warning",
-                                    "msg": "Account aangemaakt. Verificatielink is gegenereerd. Controleer de e-mailconfiguratie. Gebruik indien nodig onderstaande link.",
-                                    "code": verify_url,
+                                    "msg": "Account aangemaakt. Verificatielink is gegenereerd. Neem contact op met de beheerder.",
+                                    **({"code": _build_app_url_with_query({"verify": token})} if AUTH_DEBUG else {}),
                                 }
 
                         # Do not auto-login before verification; refresh to clear form and show flash
@@ -738,10 +739,11 @@ def _auth_forms() -> Optional[User]:
                     if sent:
                         st.success("Als het e-mailadres bestaat, is een e-mail met instructies voor wachtwoordherstel verzonden.")
                     else:
-                        st.info("Een wachtwoordherstel is aangevraagd. Als het e-mailadres bestaat, ontvang je zo een e-mail met verdere instructies.")
-                        reset_url = _build_app_url_with_query({"reset": token})
-                        st.code(reset_url, language="text")
-                        st.markdown(f"[Open link]({reset_url})")
+                        st.info("Een wachtwoordherstel is aangevraagd. Neem contact op met de beheerder als je geen e-mail ontvangt.")
+                        if AUTH_DEBUG:
+                            reset_url = _build_app_url_with_query({"reset": token})
+                            st.code(reset_url, language="text")
+                            st.markdown(f"[Open link]({reset_url})")
 
     return None
 
@@ -875,10 +877,11 @@ def login_gate() -> User:
                     if sent:
                         st.info("Verificatie e-mail verzonden.")
                     else:
-                        st.info("Verificatielink is gegenereerd. Controleer de console of e-mailconfiguratie.")
-                        verify_url = _build_app_url_with_query({"verify": token})
-                        st.code(verify_url, language="text")
-                        st.markdown(f"[Open link]({verify_url})")
+                        st.info("Verificatielink is gegenereerd. Neem contact op met de beheerder.")
+                        if AUTH_DEBUG:
+                            verify_url = _build_app_url_with_query({"verify": token})
+                            st.code(verify_url, language="text")
+                            st.markdown(f"[Open link]({verify_url})")
             st.stop()
         return user
 
