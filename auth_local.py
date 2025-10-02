@@ -399,6 +399,44 @@ def _clear_cookie() -> None:
     except Exception:
         pass
 
+
+def _enqueue_logout_redirect(delay_ms: int = 300) -> None:
+    """Ask the front-end to reload the page after clearing cookies."""
+
+    try:
+        delay_ms = max(0, int(delay_ms))
+    except Exception:
+        delay_ms = 300
+    # Build small JS snippet with a numeric delay; avoid f-string concatenation issues
+    try:
+        delay_literal = str(int(delay_ms))
+    except Exception:
+        delay_literal = "300"
+    js = (
+        "<script>(function(){setTimeout(function(){" \
+        + "window.location.replace(window.location.pathname + window.location.search);" \
+        + "}, " + delay_literal + ");})();</script>"
+    )
+    try:
+        st_html(js, height=0)
+    except Exception:
+        pass
+
+
+def _perform_logout() -> None:
+    """Clear session and schedule a front-end refresh before stopping the run."""
+
+    _clear_cookie()
+    for key in ("__cookie_bootstrap_once__", "_login_toast"):
+        try:
+            if key in st.session_state:
+                del st.session_state[key]
+        except Exception:
+            pass
+    st.session_state["_flash_notice"] = {"level": "info", "msg": "Je bent uitgelogd."}
+    _enqueue_logout_redirect()
+    st.stop()
+
 def _users_find(email: str) -> Optional[Dict[str, Any]]:
     data = _load_users()
     for u in data.get("local_users", []):
@@ -686,33 +724,42 @@ def _auth_forms() -> Optional[User]:
                     if not ok_pw:
                         st.error(msg_pw)
                     else:
-                        # First registered user becomes admin
-                        role = "admin" if _users_count() == 0 else "user"
-                        _upsert_user(email_r, pw_r, role, email_verified=False)
+                        existing = _users_find(email_r)
+                        if existing:
+                            # Treat as successful registration without changing persisted data or emailing again
+                            st.session_state["_flash_notice"] = {
+                                "level": "success",
+                                "msg": "Account aangemaakt. Controleer je inbox om je e-mailadres te verifiëren. Na verificatie kun je inloggen.",
+                            }
+                            _rerun()
+                        else:
+                            # First registered user becomes admin
+                            role = "admin" if _users_count() == 0 else "user"
+                            _upsert_user(email_r, pw_r, role, email_verified=False)
 
-                        # Issue verification token and send mail
-                        rec = _users_find(email_r)
-                        if rec:
-                            token = _create_token()
-                            rec["verification_token"] = token
-                            rec["verification_expires"] = int((_utcnow() + timedelta(seconds=VERIFICATION_TOKEN_TTL_SECONDS)).timestamp())
-                            data = _load_users()
-                            _store_users(data, rec)
-                            sent = _send_verification_email(email_r, token)
-                            if sent:
-                                st.session_state["_flash_notice"] = {
-                                    "level": "success",
-                                    "msg": "Account aangemaakt. Controleer je inbox om je e-mailadres te verifiëren. Na verificatie kun je inloggen.",
-                                }
-                            else:
-                                st.session_state["_flash_notice"] = {
-                                    "level": "warning",
-                                    "msg": "Account aangemaakt. Verificatielink is gegenereerd. Neem contact op met de beheerder.",
-                                    **({"code": _build_app_url_with_query({"verify": token})} if AUTH_DEBUG else {}),
-                                }
+                            # Issue verification token and send mail
+                            rec = _users_find(email_r)
+                            if rec:
+                                token = _create_token()
+                                rec["verification_token"] = token
+                                rec["verification_expires"] = int((_utcnow() + timedelta(seconds=VERIFICATION_TOKEN_TTL_SECONDS)).timestamp())
+                                data = _load_users()
+                                _store_users(data, rec)
+                                sent = _send_verification_email(email_r, token)
+                                if sent:
+                                    st.session_state["_flash_notice"] = {
+                                        "level": "success",
+                                        "msg": "Account aangemaakt. Controleer je inbox om je e-mailadres te verifiëren. Na verificatie kun je inloggen.",
+                                    }
+                                else:
+                                    st.session_state["_flash_notice"] = {
+                                        "level": "warning",
+                                        "msg": "Account aangemaakt. Verificatielink is gegenereerd. Neem contact op met de beheerder.",
+                                        **({"code": _build_app_url_with_query({"verify": token})} if AUTH_DEBUG else {}),
+                                    }
 
-                        # Do not auto-login before verification; refresh to clear form and show flash
-                        _rerun()
+                            # Do not auto-login before verification; refresh to clear form and show flash
+                            _rerun()
 
     # Wachtwoord vergeten tab
     with tabs[2]:
@@ -931,13 +978,16 @@ def sidebar_user_pill() -> None:
         f'<div class="sidebar-user-pill">Ingelogd als: <b>{u.email}</b> ({role_label})</div>',
         unsafe_allow_html=True,
     )
-    if st.sidebar.button("Uitloggen", key="logout_btn_sidebar"):
-        _clear_cookie()
-        _rerun()
+    logout_button(label="Uitloggen", key="logout_btn_sidebar", _button_fn=st.sidebar.button)
     st.sidebar.markdown('</div>', unsafe_allow_html=True)
 
-def logout_button(label: str = "Uitloggen") -> None:
-    return None
+
+def logout_button(label: str = "Uitloggen", *, _button_fn=None, **button_kwargs) -> None:
+    """Render a logout button that clears auth state and returns to the login screen."""
+
+    button_callable = _button_fn or st.button
+    if button_callable(label, **button_kwargs):
+        _perform_logout()
 
 # --- Optional toast in bottom-right after login ---
 def show_login_toast() -> None:

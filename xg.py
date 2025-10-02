@@ -27,8 +27,7 @@ try:
         sidebar_user_pill,
         require_role,
         show_login_toast,
-        _clear_cookie,
-        _rerun,
+        logout_button,
     )
     user = login_gate()
     # Remove persistent sidebar user pill and top logout button; handled below near filters
@@ -695,11 +694,7 @@ geselecteerde_statussen = st.sidebar.multiselect(
 # Place the logout button directly under the filter in the sidebar
 with st.sidebar:
     st.markdown("---")
-    if st.button("Uitloggen", key="logout_btn_under_filter"):
-        try:
-            _clear_cookie()
-        finally:
-            _rerun()
+    logout_button("Uitloggen", key="logout_btn_under_filter", _button_fn=st.sidebar.button)
 
 if not geselecteerde_statussen:
     st.warning("Selecteer minimaal één status om recepten te tonen.")
