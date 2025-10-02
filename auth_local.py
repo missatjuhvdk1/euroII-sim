@@ -67,20 +67,20 @@ USERS_LOCK_PATH = USERS_JSON_PATH + ".lock"
 ALLOWED_EMAIL_DOMAINS = {"euroliquids.com", "ttd.com", "gmail.com"}
 
 # SMTP (optional but recommended for production)
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USERNAME = os.getenv("SMTP_USERNAME", "meesvdk20@gmail.com")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "dungiuqrgshueiap")
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "0") or 0)
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_STARTTLS = bool(os.getenv("SMTP_STARTTLS", "1") == "1")
-MAIL_FROM = os.getenv("MAIL_FROM", SMTP_USERNAME)
+MAIL_FROM = os.getenv("MAIL_FROM", "")
 
 # Optional hardcoded dev SMTP (used only if env is empty). Fill these to send via Gmail/other.
-DEV_SMTP_HOST = "smtp.gmail.com"  # e.g. smtp.gmail.com
-DEV_SMTP_PORT = 587
-DEV_SMTP_USERNAME = ""  # your email/login
-DEV_SMTP_PASSWORD = ""  # app password or SMTP key
+DEV_SMTP_HOST = ""  # optional local/dev SMTP host
+DEV_SMTP_PORT = 0
+DEV_SMTP_USERNAME = ""
+DEV_SMTP_PASSWORD = ""
 DEV_SMTP_STARTTLS = True
-DEV_MAIL_FROM = ""  # from address (often same as username)
+DEV_MAIL_FROM = ""
 
 JWT_ALG = "HS256"
 COOKIE_NAME = os.getenv("COOKIE_NAME", "auth_session")
