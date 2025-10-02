@@ -3,9 +3,7 @@
     "admin": [
       "meesvdk20@gmail.com"
     ],
-    "user": [
-      "meesvdk2007@gmail.com"
-    ]
+    "user": []
   },
   "local_users": [
     {
@@ -17,16 +15,6 @@
       "verification_expires": 0,
       "reset_token": "HoBTX8NBYCZnRGxVniWkpPeIyYmVVazkQY8lqh4KRN0",
       "reset_expires": 1759427510
-    },
-    {
-      "email": "meesvdk2007@gmail.com",
-      "role": "user",
-      "password_hash": "$2b$12$eCLdAITn.7bHZSTFhMxZkeiXsCYDQcvT/UNFzqDFRaja9s7gXUHeu",
-      "email_verified": false,
-      "verification_token": "A6p4Us1_NO-sIpt4CZiOE9y7ztBhqq25glwc81bcWuY",
-      "verification_expires": 1759506544,
-      "reset_token": "",
-      "reset_expires": 0
     }
   ]
 }
