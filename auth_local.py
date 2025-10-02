@@ -314,6 +314,33 @@ def _js_set_cookie(token: str, ttl: int) -> None:
     except Exception:
         pass
 
+def _js_clear_cookie() -> None:
+    """Client-side cookie removal using matching attributes.
+
+    Sets the cookie with Max-Age=0 and an Expires date in the past,
+    including Path, SameSite and Secure so the browser matches and deletes it.
+    """
+    secure_flag = bool(os.getenv("COOKIE_SECURE", "1") == "1")
+    same_site_flag = os.getenv("COOKIE_SAMESITE", "Lax")
+    # Expire in the past
+    past = "Thu, 01 Jan 1970 00:00:00 GMT"
+    attrs = ["Path=/", "Max-Age=0", f"Expires={past}"]
+    if same_site_flag:
+        attrs.append(f"SameSite={same_site_flag}")
+    if secure_flag:
+        attrs.append("Secure")
+    js = (
+        "<script>document.cookie='"
+        + COOKIE_NAME
+        + "=; "
+        + "; ".join(attrs)
+        + "';</script>"
+    )
+    try:
+        st_html(js, height=0)
+    except Exception:
+        pass
+
 def _set_cookie(token: str, ttl: int) -> None:
     cm = _cookie_manager()
     # Try multiple signatures for compatibility across versions of extra_streamlit_components
@@ -362,6 +389,8 @@ def _clear_cookie() -> None:
             cm.delete(cookie=COOKIE_NAME)
         except TypeError:
             pass
+    # Ensure deletion on the client as well
+    _js_clear_cookie()
     # Also clear session fallback
     try:
         if "__auth_token__" in st.session_state:
