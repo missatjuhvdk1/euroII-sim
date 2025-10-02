@@ -121,6 +121,26 @@ def _cookie_manager():
         st.session_state[key] = stx.CookieManager()
     return st.session_state[key]
 
+def _cookie_bootstrap_ready() -> bool:
+    """Ensure the CookieManager component has mounted and synced.
+
+    On a fresh app run (e.g., after full browser refresh), Streamlit runs the
+    Python script before the front-end component has returned cookie data.
+    We render the component and perform a single rerun to allow it to sync.
+    """
+    cm = _cookie_manager()
+    try:
+        cookies = cm.get_all()
+    except Exception:
+        cookies = None
+    # None => component not yet ready; {} => ready but no cookies
+    if cookies is None and not st.session_state.get("__cookie_bootstrap_once__", False):
+        st.session_state["__cookie_bootstrap_once__"] = True
+        # Trigger a fast rerun so the component can provide cookies on next pass
+        _rerun()
+        st.stop()
+    return cookies is not None
+
 def _now_ts() -> int:
     return int(time.time())
 
@@ -758,6 +778,8 @@ def _handle_magic_links() -> None:
 def login_gate() -> User:
     _inject_layout_css()
     _handle_magic_links()
+    # Ensure cookie component is mounted and synced before reading auth
+    _cookie_bootstrap_ready()
 
     user = current_user()
     if user:
