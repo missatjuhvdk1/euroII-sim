@@ -28,6 +28,9 @@ try:
         require_role,
         show_login_toast,
         logout_button,
+        list_all_users,
+        update_user_role,
+        role_counts,
     )
     user = login_gate()
     # Remove persistent sidebar user pill and top logout button; handled below near filters
@@ -651,6 +654,126 @@ def render_recipe_management(recipes: dict[str, dict], meta: dict) -> None:
         st.info("Er zijn nog geen geüploade versies gearchiveerd.")
 
 
+def render_user_management(current_user) -> None:
+    """Visuele beheerconsole voor het toekennen van rollen aan gebruikers."""
+
+    st.title("Gebruikersbeheer")
+    st.markdown(
+        """
+        Beheer toegangsrechten voor het team. Promoveer gebruikers tot beheerder of zet ze terug naar
+        reguliere gebruikers. Wijzigingen worden direct opgeslagen en zijn meteen actief.
+        """
+    )
+
+    counts = role_counts()
+    col_admins, col_users = st.columns(2)
+    col_admins.metric("Beheerders", counts.get("admin", 0))
+    col_users.metric("Gebruikers", counts.get("user", 0))
+
+    feedback = st.session_state.pop("_user_admin_feedback", None)
+    if feedback:
+        level = feedback.get("level")
+        message = feedback.get("msg", "")
+        if level == "success":
+            st.success(message)
+        elif level == "info":
+            st.info(message)
+        else:
+            st.error(message)
+
+    st.markdown(
+        """
+        <style>
+        .user-admin-wrapper {display: flex; flex-direction: column; gap: 1rem;}
+        .user-admin-card {background: #ffffff; border: 1px solid #E5E7EB; border-radius: 12px; padding: 1rem; box-shadow: 0 8px 16px rgba(15, 23, 42, 0.04);}
+        .user-admin-card.admin {border-left: 5px solid #2563EB;}
+        .user-admin-card.user {border-left: 5px solid #10B981;}
+        .user-admin-card h3 {margin: 0; font-size: 1rem; font-weight: 600; color: #111827;}
+        .user-admin-card p {margin: 0.35rem 0 0; color: #4B5563;}
+        .user-admin-tags {margin-top: 0.75rem; display: flex; gap: 0.35rem; flex-wrap: wrap;}
+        .user-admin-tag {display: inline-flex; align-items: center; padding: 0.2rem 0.55rem; border-radius: 999px; font-size: 0.75rem; font-weight: 500;}
+        .user-admin-tag.primary {background: rgba(37, 99, 235, 0.12); color: #1D4ED8;}
+        .user-admin-tag.success {background: rgba(16, 185, 129, 0.12); color: #059669;}
+        .user-admin-tag.warning {background: rgba(217, 119, 6, 0.12); color: #B45309;}
+        .user-admin-tag.muted {background: rgba(107, 114, 128, 0.1); color: #374151;}
+        div[data-testid="column"] div.stButton > button {width: 100%; border-radius: 10px; padding: 0.6rem 1rem; font-weight: 600;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    users = list_all_users()
+    if not users:
+        st.info("Nog geen gebruikers geregistreerd.")
+        return
+
+    current_email = (current_user.email or "").lower()
+
+    def _apply_role_change(email: str, target_role: str) -> None:
+        ok, msg = update_user_role(email, target_role)
+        st.session_state["_user_admin_feedback"] = {
+            "level": "success" if ok else "error",
+            "msg": msg,
+        }
+        rerun_fn = getattr(st, "experimental_rerun", None) or getattr(st, "rerun", None)
+        if callable(rerun_fn):
+            rerun_fn()
+
+    st.markdown('<div class="user-admin-wrapper">', unsafe_allow_html=True)
+    for idx, info in enumerate(users):
+        email = info.get("email", "")
+        role = info.get("role", "user")
+        verified = bool(info.get("email_verified"))
+        pending_verification = bool(info.get("verification_pending"))
+        reset_requested = bool(info.get("reset_requested"))
+
+        tags: list[str] = []
+        role_label = "Beheerder" if role == "admin" else "Gebruiker"
+        tags.append(f'<span class="user-admin-tag primary">{role_label}</span>')
+        if verified:
+            tags.append('<span class="user-admin-tag success">E-mail geverifieerd</span>')
+        else:
+            tags.append('<span class="user-admin-tag warning">Verificatie vereist</span>')
+        # Intentionally omit extra pills like 'Verificatielink actief' and 'Reset aangevraagd' for a cleaner UI.
+
+        card_html = f"""
+        <div class="user-admin-card {'admin' if role == 'admin' else 'user'}">
+            <h3>{email}</h3>
+            <p>{'Volledige toegang tot beheerfuncties' if role == 'admin' else 'Standaardtoegang tot de rekenmodule'}</p>
+            <div class="user-admin-tags">{''.join(tags)}</div>
+        </div>
+        """
+
+        col_info, col_actions = st.columns([4, 1])
+        with col_info:
+            st.markdown(card_html, unsafe_allow_html=True)
+        with col_actions:
+            button_key = f"role_action_{idx}"
+            if role == "admin":
+                disable_demote = email.lower() == current_email or counts.get("admin", 0) <= 1
+                if st.button(
+                    "Maak gebruiker",
+                    key=f"demote_{button_key}",
+                    use_container_width=True,
+                    disabled=disable_demote,
+                ):
+                    _apply_role_change(email, "user")
+                if disable_demote:
+                    if email.lower() == current_email:
+                        st.caption("Log in als een andere beheerder om jezelf te degraderen.")
+                    else:
+                        st.caption("Minstens één beheerder moet actief blijven.")
+            else:
+                if st.button(
+                    "Maak beheerder",
+                    key=f"promote_{button_key}",
+                    use_container_width=True,
+                ):
+                    _apply_role_change(email, "admin")
+
+        st.markdown("<div style=\"height:0.5rem\"></div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
 ensure_archive_directory()
 recepten, recepten_meta = load_recepten_data()
 
@@ -664,7 +787,16 @@ except json.JSONDecodeError as exc:
     st.error(f"tanks.json bevat ongeldige JSON: {exc}")
     st.stop()
 
-modus = st.sidebar.radio("Kies scherm", ("Rekenmodule", "Receptbeheer"), index=0)
+menu_opties = ["Rekenmodule", "Receptbeheer"]
+if (user.role or "").lower() == "admin":
+    menu_opties.append("Gebruikersbeheer")
+
+modus = st.sidebar.radio("Kies scherm", menu_opties, index=0)
+
+if modus == "Gebruikersbeheer":
+    require_role(user, allowed=("admin",))
+    render_user_management(user)
+    st.stop()
 
 if modus == "Receptbeheer":
     # Restrict recipe management to admins

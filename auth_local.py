@@ -4,7 +4,7 @@ import time
 import secrets
 import json
 from dataclasses import dataclass
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 import smtplib
@@ -433,9 +433,15 @@ def _perform_logout() -> None:
                 del st.session_state[key]
         except Exception:
             pass
+    st.session_state.pop("__auth_cookie_probe__", None)
     st.session_state["_flash_notice"] = {"level": "info", "msg": "Je bent uitgelogd."}
-    _enqueue_logout_redirect()
-    st.stop()
+
+    rerun_fn = getattr(st, "experimental_rerun", None) or getattr(st, "rerun", None)
+    if callable(rerun_fn):
+        rerun_fn()
+    else:
+        _enqueue_logout_redirect()
+        st.stop()
 
 def _users_find(email: str) -> Optional[Dict[str, Any]]:
     data = _load_users()
@@ -930,8 +936,21 @@ def login_gate() -> User:
                             st.code(verify_url, language="text")
                             st.markdown(f"[Open link]({verify_url})")
             st.stop()
+        st.session_state.pop("__auth_cookie_probe__", None)
         return user
 
+    token_candidate = _get_cookie() or st.session_state.get("__auth_token__")
+    if token_candidate:
+        probe_attempts = int(st.session_state.get("__auth_cookie_probe__", 0))
+        if probe_attempts < 3:
+            st.session_state["__auth_cookie_probe__"] = probe_attempts + 1
+            with st.spinner("Bestaande sessie wordt geladen..."):
+                time.sleep(0.12)
+            _rerun()
+            st.stop()
+        st.session_state.pop("__auth_cookie_probe__", None)
+
+    st.session_state.pop("__auth_cookie_probe__", None)
     _auth_forms()
     st.stop()
 
@@ -1034,3 +1053,107 @@ def require_role(user: Optional[User], allowed: Tuple[str, ...] = ("admin", "use
     if role not in allowed_norm:
         st.error("Onvoldoende rechten voor deze handeling.")
         st.stop()
+
+
+def list_all_users() -> List[Dict[str, Any]]:
+    """Return a sanitized list of all users for administrative views."""
+
+    data = _load_users()
+    users: List[Dict[str, Any]] = []
+    for entry in data.get("local_users", []):
+        email = str(entry.get("email") or "").strip()
+        if not email:
+            continue
+        role = str(entry.get("role") or "user").lower()
+        if role not in {"admin", "user"}:
+            role = "user"
+        users.append(
+            {
+                "email": email,
+                "role": role,
+                "email_verified": bool(entry.get("email_verified", False)),
+                "verification_pending": bool(not entry.get("email_verified", False) and entry.get("verification_token")),
+                "reset_requested": bool(entry.get("reset_token")),
+            }
+        )
+
+    users.sort(key=lambda item: (0 if item["role"] == "admin" else 1, item["email"].lower()))
+    return users
+
+
+def role_counts() -> Dict[str, int]:
+    """Return the number of users per role."""
+
+    data = _load_users()
+    counts = {"admin": 0, "user": 0}
+    for entry in data.get("local_users", []):
+        role = str(entry.get("role") or "user").lower()
+        if role not in counts:
+            role = "user"
+        counts[role] += 1
+    return counts
+
+
+def update_user_role(email: str, new_role: str) -> Tuple[bool, str]:
+    """Update the role for the given user, ensuring at least one admin remains."""
+
+    target_email = (email or "").strip()
+    if not target_email:
+        return False, "Ongeldig e-mailadres."
+
+    role_norm = str(new_role or "user").lower()
+    if role_norm not in {"admin", "user"}:
+        return False, "Onbekende rol."
+
+    data = _load_users()
+    local_users = data.get("local_users", [])
+    target = None
+    for entry in local_users:
+        if (entry.get("email") or "").lower() == target_email.lower():
+            target = entry
+            break
+
+    if not target:
+        return False, "Gebruiker niet gevonden."
+
+    current_role = str(target.get("role") or "user").lower()
+    if current_role == role_norm:
+        return True, "Rol is ongewijzigd."
+
+    if current_role == "admin" and role_norm != "admin":
+        admin_count = sum(1 for entry in local_users if str(entry.get("role") or "user").lower() == "admin")
+        if admin_count <= 1:
+            return False, "Er moet minstens één beheerder blijven."
+
+    target["role"] = role_norm
+
+    # Persist updated user and synchronize the legacy roles map
+    for idx, entry in enumerate(local_users):
+        if (entry.get("email") or "").lower() == target_email.lower():
+            local_users[idx] = target
+            break
+
+    roles_map = data.setdefault("roles", {"admin": [], "user": []})
+    for rname, members in list(roles_map.items()):
+        deduped = []
+        seen = set()
+        for member in members:
+            member_norm = (member or "").strip()
+            if not member_norm:
+                continue
+            if member_norm.lower() == target_email.lower():
+                continue
+            if member_norm.lower() in seen:
+                continue
+            deduped.append(member_norm)
+            seen.add(member_norm.lower())
+        roles_map[rname] = deduped
+
+    roles_map.setdefault(role_norm, [])
+    if target_email not in roles_map[role_norm]:
+        roles_map[role_norm].append(target_email)
+
+    _save_users(data)
+
+    label = "beheerder" if role_norm == "admin" else "gebruiker"
+    return True, f"Rol bijgewerkt naar {label}."
