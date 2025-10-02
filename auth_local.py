@@ -119,7 +119,13 @@ def _cookie_manager():
     key = "_cookie_manager_instance"
     if key not in st.session_state:
         st.session_state[key] = stx.CookieManager()
-    return st.session_state[key]
+    cm = st.session_state[key]
+    # Force render/sync once; returns None before the component mounts
+    try:
+        _ = cm.get_all()
+    except Exception:
+        pass
+    return cm
 
 def _cookie_bootstrap_ready() -> bool:
     """Ensure the CookieManager component has mounted and synced.
@@ -283,14 +289,25 @@ def _set_cookie(token: str, ttl: int) -> None:
     # Try multiple signatures for compatibility across versions of extra_streamlit_components
     # Also try to set a long-lived expiry where supported.
     expires_days = max(1, int(ttl // (60 * 60 * 24)))
+    expires_at = datetime.utcnow() + timedelta(seconds=ttl)
+    secure_flag = bool(os.getenv("COOKIE_SECURE", "1") == "1")
+    same_site_flag = os.getenv("COOKIE_SAMESITE", "Lax")
     for args, kwargs in [
+        # Prefer explicit modern attributes first
+        ((), {"key": COOKIE_NAME, "value": token, "path": "/", "expires_days": expires_days, "same_site": same_site_flag, "secure": secure_flag}),
+        ((), {"cookie": COOKIE_NAME, "value": token, "path": "/", "expires_days": expires_days, "same_site": same_site_flag, "secure": secure_flag}),
+        # Alternate parameter names sometimes used
+        ((), {"key": COOKIE_NAME, "value": token, "path": "/", "expires_days": expires_days, "samesite": same_site_flag, "secure": secure_flag}),
+        ((), {"cookie": COOKIE_NAME, "value": token, "path": "/", "expires_days": expires_days, "samesite": same_site_flag, "secure": secure_flag}),
+        # Some versions support expires_at instead of expires_days
+        ((), {"key": COOKIE_NAME, "value": token, "path": "/", "expires_at": expires_at, "same_site": same_site_flag, "secure": secure_flag}),
+        ((), {"cookie": COOKIE_NAME, "value": token, "path": "/", "expires_at": expires_at, "same_site": same_site_flag, "secure": secure_flag}),
+        # Fallbacks without same_site/secure
+        ((), {"key": COOKIE_NAME, "value": token, "path": "/", "expires_days": expires_days}),
+        ((), {"cookie": COOKIE_NAME, "value": token, "path": "/", "expires_days": expires_days}),
         ((COOKIE_NAME, token), {}),
         ((), {"key": COOKIE_NAME, "value": token}),
         ((), {"cookie": COOKIE_NAME, "value": token}),
-        ((), {"key": COOKIE_NAME, "value": token, "path": "/"}),
-        ((), {"cookie": COOKIE_NAME, "value": token, "path": "/"}),
-        ((), {"key": COOKIE_NAME, "value": token, "path": "/", "expires_days": expires_days}),
-        ((), {"cookie": COOKIE_NAME, "value": token, "path": "/", "expires_days": expires_days}),
     ]:
         try:
             cm.set(*args, **kwargs)
