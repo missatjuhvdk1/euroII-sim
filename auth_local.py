@@ -30,6 +30,18 @@ AUTH_DEBUG = os.getenv("AUTH_DEBUG", "0") == "1"
 # Example: https://app.example.com
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://runs-eden-beans-ebook.trycloudflare.com/")
 
+# Emails that are always administrators and cannot be demoted
+IMMUTABLE_ADMIN_EMAILS = {
+    "meesvdk20@gmail.com",
+    "schilperoord@euroliquids.com",
+}
+
+def is_immutable_admin(email: Optional[str]) -> bool:
+    try:
+        return (email or "").strip().lower() in IMMUTABLE_ADMIN_EMAILS
+    except Exception:
+        return False
+
 def _get_or_create_cookie_secret() -> str:
     # Prefer env var if provided
     env_secret = os.getenv("COOKIE_SECRET")
@@ -470,7 +482,8 @@ def _upsert_user(email: str, password_plain: str, role: str, email_verified: boo
     hashed = bcrypt.hashpw(password_plain.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
     u = _users_find(email) or {"email": email}
     u["password_hash"] = hashed
-    u["role"] = role
+    # Force immutable admins to admin role regardless of provided role
+    u["role"] = "admin" if is_immutable_admin(email) else role
     u.setdefault("email_verified", email_verified)
     u.setdefault("verification_token", "")
     u.setdefault("verification_expires", 0)
@@ -492,6 +505,9 @@ def _upsert_user(email: str, password_plain: str, role: str, email_verified: boo
 
 def _effective_role(email: str) -> str:
     data = _load_users()
+    # Immutable admins are always admin
+    if is_immutable_admin(email):
+        return "admin"
     roles = data.get("roles", {})
     if email in roles.get("admin", []):
         return "admin"
@@ -1065,6 +1081,8 @@ def list_all_users() -> List[Dict[str, Any]]:
         if not email:
             continue
         role = str(entry.get("role") or "user").lower()
+        if is_immutable_admin(email):
+            role = "admin"
         if role not in {"admin", "user"}:
             role = "user"
         users.append(
@@ -1087,7 +1105,10 @@ def role_counts() -> Dict[str, int]:
     data = _load_users()
     counts = {"admin": 0, "user": 0}
     for entry in data.get("local_users", []):
+        email = str(entry.get("email") or "").strip()
         role = str(entry.get("role") or "user").lower()
+        if is_immutable_admin(email):
+            role = "admin"
         if role not in counts:
             role = "user"
         counts[role] += 1
@@ -1120,6 +1141,10 @@ def update_user_role(email: str, new_role: str) -> Tuple[bool, str]:
     if current_role == role_norm:
         return True, "Rol is ongewijzigd."
 
+    # Never allow demotion of immutable admins
+    if is_immutable_admin(target_email) and role_norm != "admin":
+        return False, "Deze gebruiker is een vaste beheerder en kan niet gedegradeerd worden."
+
     if current_role == "admin" and role_norm != "admin":
         admin_count = sum(1 for entry in local_users if str(entry.get("role") or "user").lower() == "admin")
         if admin_count <= 1:
@@ -1148,6 +1173,12 @@ def update_user_role(email: str, new_role: str) -> Tuple[bool, str]:
             deduped.append(member_norm)
             seen.add(member_norm.lower())
         roles_map[rname] = deduped
+
+    roles_map.setdefault("admin", [])
+    # Ensure immutable admins are always present in roles map
+    for imm in sorted(IMMUTABLE_ADMIN_EMAILS):
+        if imm not in roles_map["admin"]:
+            roles_map["admin"].append(imm)
 
     roles_map.setdefault(role_norm, [])
     if target_email not in roles_map[role_norm]:

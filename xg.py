@@ -17,8 +17,12 @@ from pulp import (
     lpSum,
 )
 
-# Set page configuration for wide mode at the start
-st.set_page_config(layout="wide")
+# Set page configuration (title + favicon + wide layout)
+st.set_page_config(
+    page_title="Rekenmodule",
+    page_icon=str((Path.cwd() / "euroliquids.png").as_posix()),
+    layout="wide",
+)
 
 # --- Authentication gate ---
 try:
@@ -31,6 +35,7 @@ try:
         list_all_users,
         update_user_role,
         role_counts,
+        is_immutable_admin,
     )
     user = login_gate()
     # Remove persistent sidebar user pill and top logout button; handled below near filters
@@ -750,7 +755,11 @@ def render_user_management(current_user) -> None:
         with col_actions:
             button_key = f"role_action_{idx}"
             if role == "admin":
-                disable_demote = email.lower() == current_email or counts.get("admin", 0) <= 1
+                disable_demote = (
+                    email.lower() == current_email
+                    or counts.get("admin", 0) <= 1
+                    or is_immutable_admin(email)
+                )
                 if st.button(
                     "Maak gebruiker",
                     key=f"demote_{button_key}",
@@ -759,7 +768,9 @@ def render_user_management(current_user) -> None:
                 ):
                     _apply_role_change(email, "user")
                 if disable_demote:
-                    if email.lower() == current_email:
+                    if is_immutable_admin(email):
+                        st.caption("Vaste beheerder kan niet gedegradeerd worden.")
+                    elif email.lower() == current_email:
                         st.caption("Log in als een andere beheerder om jezelf te degraderen.")
                     else:
                         st.caption("Minstens één beheerder moet actief blijven.")
