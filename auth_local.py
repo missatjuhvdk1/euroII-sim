@@ -16,6 +16,7 @@ import streamlit as st
 from dotenv import load_dotenv
 from jose import jwt, JWTError
 from filelock import FileLock
+from streamlit.components.v1 import html as st_html
 
 # =========================
 # Configuration
@@ -284,6 +285,35 @@ def _get_cookie() -> Optional[str]:
         except TypeError:
             return None
 
+def _js_set_cookie(token: str, ttl: int) -> None:
+    """Client-side fallback: set cookie via inline JS.
+
+    This complements CookieManager for environments where its setter
+    might be ignored. Runs in the current render and should be fast.
+    """
+    secure_flag = bool(os.getenv("COOKIE_SECURE", "1") == "1")
+    same_site_flag = os.getenv("COOKIE_SAMESITE", "Lax")
+    expires_dt = datetime.utcnow() + timedelta(seconds=ttl)
+    # RFC1123/GMT format for Expires
+    expires_str = expires_dt.strftime("%a, %d %b %Y %H:%M:%S GMT")
+    # Build cookie attributes
+    attrs = ["Path=/", f"Max-Age={ttl}", f"Expires={expires_str}"]
+    if same_site_flag:
+        attrs.append(f"SameSite={same_site_flag}")
+    if secure_flag:
+        attrs.append("Secure")
+    cookie_js = (
+        f"document.cookie = '{COOKIE_NAME}=' + encodeURIComponent(%TOKEN%) + '; "
+        + "; ".join(attrs) + "';"
+    )
+    # Inject token safely
+    safe_token = token.replace("\\", "\\\\").replace("'", "\\'")
+    js = "<script>" + cookie_js.replace("%TOKEN%", "'" + safe_token + "'") + "</script>"
+    try:
+        st_html(js, height=0)
+    except Exception:
+        pass
+
 def _set_cookie(token: str, ttl: int) -> None:
     cm = _cookie_manager()
     # Try multiple signatures for compatibility across versions of extra_streamlit_components
@@ -317,6 +347,8 @@ def _set_cookie(token: str, ttl: int) -> None:
                 st.session_state["__auth_token__"] = token
             except Exception:
                 pass
+            # Also set via JS as a robust client-side fallback
+            _js_set_cookie(token, ttl)
             return
         except TypeError:
             continue
