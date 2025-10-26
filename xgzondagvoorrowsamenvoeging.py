@@ -1727,17 +1727,9 @@ if st.session_state.optimized_status == "Succes" and st.session_state.optimized_
         return '{:.3f}'.format(val).rstrip('0').rstrip('.')
     
     def format_toevoegen_grondstof(val):
-        try:
-            if val is None:
-                return ''
-            if isinstance(val, float) and np.isnan(val):
-                return ''
-            v = float(val)
-        except (TypeError, ValueError):
-            return ''
-        if v < 10:
-            return '{:.1f}'.format(v)
-        return '{:.0f}'.format(v)
+        if val < 10:
+            return '{:.1f}'.format(val)
+        return '{:.0f}'.format(val)
     
     format_dict = {
         'Toevoegen Grondstof': format_toevoegen_grondstof,
@@ -1752,44 +1744,7 @@ if st.session_state.optimized_status == "Succes" and st.session_state.optimized_
     percentage_toename = (totale_toevoeging / massa_product) * 100 if massa_product > 0 else 0
     st.success(f"Optimalisatie succesvol! Totale massa na correctie: **{st.session_state.optimized_totale_massa:.2f} kg** (toevoeging: **{totale_toevoeging:.2f} kg**, {percentage_toename:.2f}% toename)")
     
-    def show_grouped_table(df_src):
-        res = df_src.copy()
-
-        # Count sources per element and detect duplicates
-        elem_source_count = res.groupby('Element')['Grondstof'].transform('nunique')
-        elem_is_duplicate = elem_source_count > 1
-
-        # Does a source contribute to more than one element?
-        grondstof_multi_map = res.groupby('Grondstof')['Element'].nunique().gt(1).to_dict()
-        src_is_multi = res['Grondstof'].map(grondstof_multi_map).fillna(False)
-
-        # For each element: are ALL its contributing sources multi-element?
-        all_multi_by_elem = (
-            res.assign(_is_multi=src_is_multi)
-               .groupby('Element')['_is_multi']
-               .transform('all')
-        )
-
-        # Elements to combine visually: duplicates AND all sources are multi-element
-        combine_flag = elem_is_duplicate & all_multi_by_elem
-
-        # Keep only first row for combined elements; keep all rows otherwise
-        keep_mask = (~combine_flag) | (~res.duplicated(subset=['Element'], keep='first'))
-        res = res.loc[keep_mask].copy()
-
-        # After filtering, blank Grondstof and Toevoegen for the remaining rows of combined elements
-        combine_rows_after = combine_flag.loc[res.index]
-        res.loc[combine_rows_after, 'Grondstof'] = ''
-        res.loc[combine_rows_after, 'Toevoegen Grondstof'] = np.nan
-
-        st.dataframe(
-            res.style
-              .applymap(highlight_specs, subset=['Binnen Specs'])
-              .format(format_dict, na_rep='')
-        )
-
-    # original results
-    show_grouped_table(st.session_state.optimized_resultaten)
+    st.dataframe(st.session_state.optimized_resultaten.style.applymap(highlight_specs, subset=['Binnen Specs']).format(format_dict))
     
     st.subheader("Waarschuwingen")
     warnings_present = False
@@ -1931,39 +1886,9 @@ if st.session_state.optimized_toevoegingen_grond is not None:
                 st.success(f"Aangepaste optimalisatie succesvol! Totale massa na correctie: **{adj_optimized_totale_massa:.2f} kg** (toevoeging: **{adj_totale_toevoeging:.2f} kg**, {adj_percentage_toename:.2f}% toename)")
                 
                 adj_optimized_resultaten = adj_df[['Grondstof', 'Element', 'Gemeten Concentratie', 'Toevoegen Grondstof', 'Na Optimalisatie', 'Spec', 'Min', 'Max', 'Binnen Specs', 'Eenheid']]
-                # adjusted results
-                if 'show_grouped_table' not in globals():
-                    def show_grouped_table(df_src):
-                        res = df_src.copy()
-
-                        elem_source_count = res.groupby('Element')['Grondstof'].transform('nunique')
-                        elem_is_duplicate = elem_source_count > 1
-
-                        grondstof_multi_map = res.groupby('Grondstof')['Element'].nunique().gt(1).to_dict()
-                        src_is_multi = res['Grondstof'].map(grondstof_multi_map).fillna(False)
-
-                        all_multi_by_elem = (
-                            res.assign(_is_multi=src_is_multi)
-                               .groupby('Element')['_is_multi']
-                               .transform('all')
-                        )
-
-                        combine_flag = elem_is_duplicate & all_multi_by_elem
-
-                        keep_mask = (~combine_flag) | (~res.duplicated(subset=['Element'], keep='first'))
-                        res = res.loc[keep_mask].copy()
-
-                        combine_rows_after = combine_flag.loc[res.index]
-                        res.loc[combine_rows_after, 'Grondstof'] = ''
-                        res.loc[combine_rows_after, 'Toevoegen Grondstof'] = np.nan
-
-                        st.dataframe(
-                            res.style
-                              .applymap(highlight_specs, subset=['Binnen Specs'])
-                              .format(format_dict, na_rep='')
-                        )
-
-                show_grouped_table(adj_optimized_resultaten)
+                st.dataframe(
+                    adj_optimized_resultaten.style.applymap(highlight_specs, subset=['Binnen Specs']).format(format_dict)
+                )
                 
                 st.subheader("Aangepaste Waarschuwingen")
                 warnings_present = False

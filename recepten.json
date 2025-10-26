@@ -1,13 +1,14 @@
 {
     "meta": {
         "schema_version": 1,
-        "template_version": "2024.07",
-        "last_uploaded_at": "2025-10-02T15:55:25.493014",
+        "template_version": "2024.08",
+        "last_uploaded_at": "2025-10-21T14:49:50.075923",
         "bron": "excel-upload",
-        "archive_file": "recepten_upload_20251002-155525.xlsx",
+        "archive_file": "recepten_upload_20251021-144950.xlsx",
         "total_recipes": 8,
         "total_componenten": 58,
-        "last_updated": "2025-10-02T15:55:25.493014"
+        "total_tanks": 7,
+        "last_updated": "2025-10-21T14:49:50.075923"
     },
     "recipes": {
         "ANDY Powermix 1050": {
@@ -139,7 +140,7 @@
             "Recept_ID": "ANDY Powermix 1050",
             "Status": "Actief",
             "Ingangsdatum": null,
-            "Opmerkingen": "nan"
+            "Opmerkingen": ""
         },
         "CalMag Liquid": {
             "Hoeveelheid": 10000.0,
@@ -220,7 +221,7 @@
             "Recept_ID": "CalMag Liquid",
             "Status": "Actief",
             "Ingangsdatum": null,
-            "Opmerkingen": "nan"
+            "Opmerkingen": ""
         },
         "DKP 0-20-25": {
             "Hoeveelheid": 14100.0,
@@ -281,7 +282,7 @@
             "Recept_ID": "DKP 0-20-25",
             "Status": "Actief",
             "Ingangsdatum": null,
-            "Opmerkingen": "nan"
+            "Opmerkingen": ""
         },
         "Laki Premium": {
             "Hoeveelheid": 10000.0,
@@ -472,7 +473,7 @@
             "Recept_ID": "Laki Premium",
             "Status": "Actief",
             "Ingangsdatum": null,
-            "Opmerkingen": "nan"
+            "Opmerkingen": ""
         },
         "NPK Protect 3+": {
             "Hoeveelheid": 14100.0,
@@ -603,7 +604,7 @@
             "Recept_ID": "NPK Protect 3+",
             "Status": "Actief",
             "Ingangsdatum": null,
-            "Opmerkingen": "nan"
+            "Opmerkingen": ""
         },
         "PB Bravo": {
             "Hoeveelheid": 24000.0,
@@ -664,7 +665,7 @@
             "Recept_ID": "PB Bravo",
             "Status": "Actief",
             "Ingangsdatum": null,
-            "Opmerkingen": "nan"
+            "Opmerkingen": ""
         },
         "Zero Waste Solution A": {
             "Hoeveelheid": 1100.0,
@@ -755,7 +756,7 @@
             "Recept_ID": "Zero Waste Solution A",
             "Status": "Actief",
             "Ingangsdatum": null,
-            "Opmerkingen": "nan"
+            "Opmerkingen": ""
         },
         "Zero Waste Solution B": {
             "Hoeveelheid": 10000.0,
@@ -836,7 +837,7 @@
             "Recept_ID": "Zero Waste Solution B",
             "Status": "Actief",
             "Ingangsdatum": null,
-            "Opmerkingen": "nan"
+            "Opmerkingen": ""
         }
     }
 }
