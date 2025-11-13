@@ -2,13 +2,13 @@
     "meta": {
         "schema_version": 1,
         "template_version": "2024.08",
-        "last_uploaded_at": "2025-10-21T14:49:50.075923",
+        "last_uploaded_at": "2025-11-13T15:50:16.896016",
         "bron": "excel-upload",
-        "archive_file": "recepten_upload_20251021-144950.xlsx",
+        "archive_file": "recepten_upload_20251113-155016.xlsx",
         "total_recipes": 8,
         "total_componenten": 58,
         "total_tanks": 7,
-        "last_updated": "2025-10-21T14:49:50.075923"
+        "last_updated": "2025-11-13T15:50:16.896016"
     },
     "recipes": {
         "ANDY Powermix 1050": {
@@ -138,6 +138,7 @@
                 ]
             },
             "Recept_ID": "ANDY Powermix 1050",
+            "Recept_Nr": "592",
             "Status": "Actief",
             "Ingangsdatum": null,
             "Opmerkingen": ""
@@ -219,6 +220,7 @@
                 ]
             },
             "Recept_ID": "CalMag Liquid",
+            "Recept_Nr": "1",
             "Status": "Actief",
             "Ingangsdatum": null,
             "Opmerkingen": ""
@@ -280,6 +282,7 @@
                 ]
             },
             "Recept_ID": "DKP 0-20-25",
+            "Recept_Nr": "1",
             "Status": "Actief",
             "Ingangsdatum": null,
             "Opmerkingen": ""
@@ -471,6 +474,7 @@
                 ]
             },
             "Recept_ID": "Laki Premium",
+            "Recept_Nr": "1",
             "Status": "Actief",
             "Ingangsdatum": null,
             "Opmerkingen": ""
@@ -602,6 +606,7 @@
                 ]
             },
             "Recept_ID": "NPK Protect 3+",
+            "Recept_Nr": "1",
             "Status": "Actief",
             "Ingangsdatum": null,
             "Opmerkingen": ""
@@ -663,6 +668,7 @@
                 ]
             },
             "Recept_ID": "PB Bravo",
+            "Recept_Nr": "1",
             "Status": "Actief",
             "Ingangsdatum": null,
             "Opmerkingen": ""
@@ -754,6 +760,7 @@
                 ]
             },
             "Recept_ID": "Zero Waste Solution A",
+            "Recept_Nr": "1",
             "Status": "Actief",
             "Ingangsdatum": null,
             "Opmerkingen": ""
@@ -835,6 +842,7 @@
                 ]
             },
             "Recept_ID": "Zero Waste Solution B",
+            "Recept_Nr": "1",
             "Status": "Actief",
             "Ingangsdatum": null,
             "Opmerkingen": ""

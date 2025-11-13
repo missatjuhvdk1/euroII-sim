@@ -60,6 +60,7 @@ TANK_SHEET_NAME = "Tanks"
 TEMPLATE_VERSION = "2024.08"
 
 RECIPE_TEMPLATE_COLUMNS = [
+    "Recept nr.",
     "Recept ID",
     "Naam",
     "Status",
@@ -71,6 +72,7 @@ RECIPE_TEMPLATE_COLUMNS = [
 ]
 
 COMPOSITION_TEMPLATE_COLUMNS = [
+    "Recept nr.",
     "Recept ID",
     "Grondstof",
     "Element",
@@ -91,7 +93,9 @@ TANK_TEMPLATE_COLUMNS = [
     "Max. vulgraad (m3)",
 ]
 
+# "Recept nr." is optional and serves as a disambiguator alongside "Recept ID".
 RECIPE_REQUIRED_COLUMNS = {"Recept ID", "Naam", "Hoeveelheid", "Dichtheid"}
+# "Recept nr." in composition is optional; if present it is used along with "Recept ID".
 COMPOSITION_REQUIRED_COLUMNS = {
     "Recept ID",
     "Grondstof",
@@ -231,6 +235,7 @@ def generate_recipe_template_bytes() -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill
     from openpyxl.worksheet.datavalidation import DataValidation
+    from openpyxl.utils import get_column_letter
 
     wb = Workbook()
 
@@ -255,7 +260,10 @@ def generate_recipe_template_bytes() -> bytes:
         error="Kies een status uit de lijst.",
     )
     ws_recipes.add_data_validation(status_validation)
-    status_validation.add("C2:C500")
+    # Add validation dynamically on the "Status" column
+    status_col_idx = RECIPE_TEMPLATE_COLUMNS.index("Status") + 1
+    status_col_letter = get_column_letter(status_col_idx)
+    status_validation.add(f"{status_col_letter}2:{status_col_letter}500")
 
     ws_comp = wb.create_sheet(COMPOSITION_SHEET_NAME)
     ws_comp.append(COMPOSITION_TEMPLATE_COLUMNS)
@@ -293,7 +301,10 @@ def generate_recipe_template_bytes() -> bytes:
         error="Gebruik wt% of mg/kg.",
     )
     ws_comp.add_data_validation(eenheid_validation)
-    eenheid_validation.add("D2:D1000")
+    # Add validation dynamically on the "Eenheid" column
+    eenheid_col_idx = COMPOSITION_TEMPLATE_COLUMNS.index("Eenheid") + 1
+    eenheid_col_letter = get_column_letter(eenheid_col_idx)
+    eenheid_validation.add(f"{eenheid_col_letter}2:{eenheid_col_letter}1000")
 
     output = io.BytesIO()
     wb.save(output)
@@ -321,12 +332,14 @@ def generate_recipe_export_bytes(recipes: dict[str, dict], tanks: dict[str, dict
         data = payload.get("Data", {})
         max_volume = payload.get("Max_Volume_liter", payload.get("Max_Volume"))
         recept_id = payload.get("Recept_ID") or naam
+        recept_nr = payload.get("Recept_Nr") or payload.get("Recept nr.") or ""
 
         opmerkingen_val = payload.get("Opmerkingen", "")
         if opmerkingen_val is None or (isinstance(opmerkingen_val, str) and opmerkingen_val.strip().lower() == "nan"):
             opmerkingen_val = ""
 
         recipe_values = {
+            "Recept nr.": recept_nr,
             "Recept ID": recept_id,
             "Naam": naam,
             "Status": payload.get("Status", "Actief"),
@@ -347,6 +360,7 @@ def generate_recipe_export_bytes(recipes: dict[str, dict], tanks: dict[str, dict
         row_count = len(data.get("Grondstof", []))
         for i in range(row_count):
             comp_values = {
+                "Recept nr.": recept_nr,
                 "Recept ID": recept_id,
                 "Grondstof": data.get("Grondstof", [None] * row_count)[i],
                 "Element": data.get("Element", [None] * row_count)[i],
@@ -462,21 +476,29 @@ def parse_uploaded_dataset(file_bytes: bytes) -> tuple[dict, dict, dict, dict, l
     recipes_payload: dict[str, dict] = {}
     tanks_payload: dict[str, dict] = {}
     composition_preview: dict[str, pd.DataFrame] = {}
-    gebruikte_ids: set[str] = set()
+    # Keep track of unique pairs (Recept nr., Recept ID); if nr is empty, use just ID
+    gebruikte_ids: set[tuple[str, str]] = set()
     gebruikte_tank_ids: set[str] = set()
 
     for idx, row in recepten_df.iterrows():
         row_number = idx + 2  # rekening houden met header
         recept_id = str(row.get("Recept ID", "")).strip()
+        recept_nr_val = row.get("Recept nr.")
+        recept_nr = ""
+        if pd.notna(recept_nr_val):
+            recept_nr = str(recept_nr_val).strip()
         naam = str(row.get("Naam", "")).strip()
 
         if not recept_id:
             errors.append(f"Recept ID ontbreekt in Recepten rij {row_number}.")
             continue
-        if recept_id in gebruikte_ids:
-            errors.append(f"Dubbele Recept ID '{recept_id}' in Recepten tabblad.")
+        id_pair = (recept_nr, recept_id)
+        if id_pair in gebruikte_ids:
+            # Exact same pair is a duplicate
+            suffix = f" (Recept nr. '{recept_nr}')" if recept_nr else ""
+            errors.append(f"Dubbele combinatie Recept ID '{recept_id}'{suffix} in Recepten tabblad.")
             continue
-        gebruikte_ids.add(recept_id)
+        gebruikte_ids.add(id_pair)
 
         if not naam:
             errors.append(f"Naam ontbreekt in Recepten rij {row_number}.")
@@ -506,14 +528,19 @@ def parse_uploaded_dataset(file_bytes: bytes) -> tuple[dict, dict, dict, dict, l
 
         recipe_meta = {
             "Recept_ID": recept_id,
+            "Recept_Nr": recept_nr or None,
             "Status": str(row.get("Status", "Actief")).strip() or "Actief",
             "Ingangsdatum": coerce_date(row.get("Ingangsdatum")),
             "Opmerkingen": opmerkingen_clean,
         }
 
-        matching_comp = samenstelling_df[
-            samenstelling_df["Recept ID"].astype(str).str.strip() == recept_id
-        ]
+        # Match composition rows: prefer (Recept nr., Recept ID) if nr present; otherwise fall back to only ID
+        id_matches = samenstelling_df["Recept ID"].astype(str).str.strip() == recept_id
+        if "Recept nr." in samenstelling_df.columns and recept_nr:
+            nr_series = samenstelling_df["Recept nr."].astype(str).str.strip()
+            matching_comp = samenstelling_df[id_matches & (nr_series == recept_nr)]
+        else:
+            matching_comp = samenstelling_df[id_matches]
         if matching_comp.empty:
             errors.append(f"Geen regels in tabblad Samenstelling voor recept '{naam}'.")
             continue
@@ -702,8 +729,8 @@ def render_recipe_management(recipes: dict[str, dict], tanks: dict[str, dict], m
         """
         **Nieuwe recepten toevoegen**
 
-        1. Voeg op het tabblad *Recepten* een nieuwe rij toe met een uniek `Recept ID`, de `Naam` en de basisgegevens.
-        2. Vul op het tabblad *Samenstelling* meerdere rijen in met dezelfde `Recept ID` en specificeer per grondstof de specs.
+        1. Voeg op het tabblad *Recepten* een nieuwe rij toe met `Recept nr.` (optioneel), een uniek `Recept ID`, de `Naam` en de basisgegevens.
+        2. Vul op het tabblad *Samenstelling* meerdere rijen in met dezelfde `Recept ID` en, indien gebruikt, dezelfde `Recept nr.`; specificeer per grondstof de specs.
         3. Sla het bestand op en upload het via onderstaande sectie.
         """
     )
@@ -716,8 +743,10 @@ def render_recipe_management(recipes: dict[str, dict], tanks: dict[str, dict], m
         )
         for naam, payload in recipes.items():
             recept_id = payload.get("Recept_ID") or naam
+            recept_nr = payload.get("Recept_Nr") or ""
             overzicht_data.append(
                 {
+                    "Recept nr.": recept_nr,
                     "Recept ID": recept_id,
                     "Naam": naam,
                     "Status": payload.get("Status", "Actief"),
@@ -894,13 +923,10 @@ def render_recipe_management(recipes: dict[str, dict], tanks: dict[str, dict], m
     if archive_files:
         historie_data = []
         for path in archive_files[:10]:
-            historie_data.append(
-                {
-                    "Bestand": path.name,
-                    "Datum": datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M"),
-                    "Grootte (KB)": round(path.stat().st_size / 1024, 1),
-                }
-            )
+            dt_str = datetime.fromtimestamp(path.stat().st_mtime).strftime("%d-%m-%Y %H:%M")
+            size_kb = path.stat().st_size / 1024
+            size_str = f"{size_kb:.1f}".rstrip("0").rstrip(".")
+            historie_data.append({"Bestand": path.name, "Datum": dt_str, "Grootte (KB)": size_str})
         st.table(pd.DataFrame(historie_data))
     else:
         st.info("Er zijn nog geen geüploade versies gearchiveerd.")
@@ -1109,7 +1135,17 @@ if not tanks:
 # Recept- en tankselectie
 col_recept, col_tank = st.columns(2)
 with col_recept:
-    recept = st.selectbox("Kies een recept", list(recepten.keys()), help="Selecteer het recept om te bewerken.")
+    def _recept_label(nm: str) -> str:
+        payload = recepten.get(nm, {})
+        nr = payload.get("Recept_Nr") or payload.get("Recept nr.") or payload.get("Recept nr") or ""
+        return f"{nm} – Recept nr. {nr}" if nr else nm
+
+    recept = st.selectbox(
+        "Kies een recept",
+        list(recepten.keys()),
+        format_func=_recept_label,
+        help="Selecteer het recept om te bewerken.",
+    )
 with col_tank:
     tank = st.selectbox("Kies een tank", list(tanks.keys()), help="Selecteer de tank/mixer voor de berekening.")
 
