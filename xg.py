@@ -124,6 +124,66 @@ COMPOSITION_NUMERIC_FIELDS = [
 DEFAULT_RECIPE_META = {"schema_version": 1, "template_version": TEMPLATE_VERSION}
 
 
+def _normalize_text(value):
+    """Clean string-like values, ignoring NaN/empty representations."""
+    if value is None:
+        return ""
+    text = str(value).strip()
+    return "" if text.lower() == "nan" else text
+
+
+def _format_recipe_reference(payload: dict, fallback_key: str | None = None) -> str:
+    """Return a friendly label that prioritizes name, then Recept nr., then ID."""
+    if payload is None:
+        payload = {}
+    name = _normalize_text(payload.get("Naam"))
+    nr = (
+        _normalize_text(payload.get("Recept_Nr"))
+        or _normalize_text(payload.get("Recept nr."))
+        or _normalize_text(payload.get("Recept nr"))
+    )
+    if name and nr:
+        return f"{name} (Recept nr. {nr})"
+    if name:
+        return name
+    if nr:
+        return f"Recept nr. {nr}"
+    rid = _normalize_text(payload.get("Recept_ID"))
+    if rid:
+        return f"Recept ID {rid}"
+    return fallback_key or ""
+
+
+def _derive_recipe_key(recept_nr: str, recept_id: str, existing_keys: set[str]) -> str:
+    """Build a deterministic key that favors Recept nr. but falls back to ID when needed."""
+    candidate = recept_nr or recept_id or ""
+    if not candidate:
+        candidate = recept_id or ""
+    if candidate in existing_keys:
+        if recept_nr:
+            candidate = f"{recept_nr} – {recept_id}"
+        else:
+            candidate = f"{recept_id}"
+    original_candidate = candidate
+    suffix = 1
+    while candidate in existing_keys:
+        candidate = f"{original_candidate} ({suffix})"
+        suffix += 1
+    existing_keys.add(candidate)
+    return candidate
+
+
+def _normalize_loaded_recipes(raw_recipes: dict) -> dict:
+    """Ensure legacy recipe dictionaries still expose a Naam field."""
+    normalized: dict = {}
+    for key, payload in raw_recipes.items():
+        if isinstance(payload, dict):
+            if not _normalize_text(payload.get("Naam")):
+                payload = {**payload, "Naam": key}
+        normalized[key] = payload
+    return normalized
+
+
 def is_placeholder_element(element: object) -> bool:
     element_str = str(element).strip().lower() if element is not None else ""
     return element_str in {"", "geen", "nan", "none"}
@@ -179,6 +239,7 @@ def load_recepten_data():
         st.error("Onbekend formaat van recepten.json. Controleer het bestand.")
         st.stop()
 
+    recipes = _normalize_loaded_recipes(recipes)
     return recipes, meta
 
 
@@ -328,9 +389,14 @@ def generate_recipe_export_bytes(recipes: dict[str, dict], tanks: dict[str, dict
     composition_row = 2
     tank_row = 2
 
-    for naam, payload in sorted(recipes.items()):
+    def _recipe_export_sort_key(item):
+        recipe_key, payload = item
+        return _normalize_text(payload.get("Naam")) or _normalize_text(recipe_key)
+
+    for recipe_key, payload in sorted(recipes.items(), key=_recipe_export_sort_key):
         data = payload.get("Data", {})
         max_volume = payload.get("Max_Volume_liter", payload.get("Max_Volume"))
+        naam = payload.get("Naam") or recipe_key
         recept_id = payload.get("Recept_ID") or naam
         recept_nr = payload.get("Recept_Nr") or payload.get("Recept nr.") or ""
 
@@ -476,6 +542,7 @@ def parse_uploaded_dataset(file_bytes: bytes) -> tuple[dict, dict, dict, dict, l
     recipes_payload: dict[str, dict] = {}
     tanks_payload: dict[str, dict] = {}
     composition_preview: dict[str, pd.DataFrame] = {}
+    recept_keys: set[str] = set()
     # Keep track of unique pairs (Recept nr., Recept ID); if nr is empty, use just ID
     gebruikte_ids: set[tuple[str, str]] = set()
     gebruikte_tank_ids: set[str] = set()
@@ -503,9 +570,8 @@ def parse_uploaded_dataset(file_bytes: bytes) -> tuple[dict, dict, dict, dict, l
         if not naam:
             errors.append(f"Naam ontbreekt in Recepten rij {row_number}.")
             continue
-        if naam in recipes_payload:
-            errors.append(f"Dubbele naam '{naam}' in Recepten tabblad.")
-            continue
+
+        recipe_key = _derive_recipe_key(recept_nr, recept_id, recept_keys)
 
         hoeveelheid = coerce_float(row.get("Hoeveelheid"), f"Hoeveelheid (rij {row_number})", errors)
         dichtheid = coerce_float(row.get("Dichtheid"), f"Dichtheid (rij {row_number})", errors)
@@ -527,6 +593,7 @@ def parse_uploaded_dataset(file_bytes: bytes) -> tuple[dict, dict, dict, dict, l
                 opmerkingen_clean = ""
 
         recipe_meta = {
+            "Naam": naam,
             "Recept_ID": recept_id,
             "Recept_Nr": recept_nr or None,
             "Status": str(row.get("Status", "Actief")).strip() or "Actief",
@@ -621,14 +688,14 @@ def parse_uploaded_dataset(file_bytes: bytes) -> tuple[dict, dict, dict, dict, l
             )
             continue
 
-        recipes_payload[naam] = {
+        recipes_payload[recipe_key] = {
             "Hoeveelheid": hoeveelheid,
             "Dichtheid": dichtheid,
             "Max_Volume": max_volume,
             "Data": comp_dict,
             **recipe_meta,
         }
-        composition_preview[naam] = matching_comp.reset_index(drop=True)
+        composition_preview[recipe_key] = matching_comp.reset_index(drop=True)
 
     for idx, row in tanks_df.iterrows():
         row_number = idx + 2
@@ -741,9 +808,16 @@ def render_recipe_management(recipes: dict[str, dict], tanks: dict[str, dict], m
         laatst_bijgewerkt = format_timestamp(
             meta.get("last_uploaded_at") or meta.get("last_updated")
         )
-        for naam, payload in recipes.items():
-            recept_id = payload.get("Recept_ID") or naam
-            recept_nr = payload.get("Recept_Nr") or ""
+        for recipe_key, payload in recipes.items():
+            naam = payload.get("Naam") or recipe_key
+            recept_id = payload.get("Recept_ID") or ""
+            recept_nr = (
+                payload.get("Recept_Nr")
+                or payload.get("Recept nr.")
+                or payload.get("Recept nr")
+                or ""
+            )
+            recept_nr = _normalize_text(recept_nr)
             overzicht_data.append(
                 {
                     "Recept nr.": recept_nr,
@@ -847,17 +921,24 @@ def render_recipe_management(recipes: dict[str, dict], tanks: dict[str, dict], m
                 st.dataframe(tanks_preview, use_container_width=True)
 
             st.markdown("**Samenstelling per recept**")
-            for naam, comp_df in composition_frames.items():
-                with st.expander(f"{naam} ({len(comp_df)} regels)", expanded=False):
+            for recipe_key, comp_df in composition_frames.items():
+                label = _format_recipe_reference(parsed_recipes.get(recipe_key, {}), recipe_key)
+                with st.expander(f"{label} ({len(comp_df)} regels)", expanded=False):
                     st.dataframe(comp_df, use_container_width=True)
 
         if not parse_errors:
-            huidige_namen = set(recipes.keys())
-            nieuwe_namen = set(parsed_recipes.keys())
-            toegevoegde = sorted(nieuwe_namen - huidige_namen)
-            verwijderd = sorted(huidige_namen - nieuwe_namen)
-            potentieel_bijgewerkt = sorted(nieuwe_namen & huidige_namen)
-            bijgewerkt = [naam for naam in potentieel_bijgewerkt if parsed_recipes[naam] != recipes.get(naam)]
+            huidige_keys = set(recipes.keys())
+            nieuwe_keys = set(parsed_recipes.keys())
+            toegevoegde = sorted(nieuwe_keys - huidige_keys)
+            verwijderd = sorted(huidige_keys - nieuwe_keys)
+            potentieel_bijgewerkt = sorted(nieuwe_keys & huidige_keys)
+            bijgewerkt = [
+                key for key in potentieel_bijgewerkt
+                if parsed_recipes.get(key) != recipes.get(key)
+            ]
+
+            def _describe(key, source_map):
+                return _format_recipe_reference(source_map.get(key, {}), key)
 
             huidige_tanks = set(tanks.keys())
             nieuwe_tanks = set(parsed_tanks.keys())
@@ -870,11 +951,20 @@ def render_recipe_management(recipes: dict[str, dict], tanks: dict[str, dict], m
 
             st.markdown("**Wijzigingsoverzicht**")
             if toegevoegde:
-                st.success("Recepten toegevoegd: " + ", ".join(toegevoegde))
+                st.success(
+                    "Recepten toegevoegd: "
+                    + ", ".join(_describe(key, parsed_recipes) for key in toegevoegde)
+                )
             if bijgewerkt:
-                st.info("Recepten bijgewerkt: " + ", ".join(bijgewerkt))
+                st.info(
+                    "Recepten bijgewerkt: "
+                    + ", ".join(_describe(key, parsed_recipes) for key in bijgewerkt)
+                )
             if verwijderd:
-                st.warning("Recepten verwijderd: " + ", ".join(verwijderd))
+                st.warning(
+                    "Recepten verwijderd: "
+                    + ", ".join(_describe(key, recipes) for key in verwijderd)
+                )
             if tank_toegevoegd:
                 st.success("Tanks toegevoegd: " + ", ".join(tank_toegevoegd))
             if tank_bijgewerkt:
@@ -1117,8 +1207,8 @@ if not geselecteerde_statussen:
     st.stop()
 
 gefilterde_recepten = {
-    naam: data
-    for naam, data in recepten.items()
+    recipe_key: data
+    for recipe_key, data in recepten.items()
     if ((data.get("Status") or "Actief").strip() or "Actief") in geselecteerde_statussen
 }
 
@@ -1137,8 +1227,7 @@ col_recept, col_tank = st.columns(2)
 with col_recept:
     def _recept_label(nm: str) -> str:
         payload = recepten.get(nm, {})
-        nr = payload.get("Recept_Nr") or payload.get("Recept nr.") or payload.get("Recept nr") or ""
-        return f"{nm} – Recept nr. {nr}" if nr else nm
+        return _format_recipe_reference(payload, nm)
 
     recept = st.selectbox(
         "Kies een recept",

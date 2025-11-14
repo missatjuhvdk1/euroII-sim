@@ -77,7 +77,7 @@ USERS_LOCK_PATH = USERS_JSON_PATH + ".lock"
 # Abstract API Email Verification removed
 
 # Allowed domains (dev includes gmail.com by default)
-ALLOWED_EMAIL_DOMAINS = {"euroliquids.com", "ttd.com", "meesvdk20gmail.com"}
+ALLOWED_EMAIL_DOMAINS = {"euroliquids.com", "ttd.com", "gmail.com"}
 
 # SMTP (optional but recommended for production)
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
